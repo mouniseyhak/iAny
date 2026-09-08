@@ -8,11 +8,13 @@ import {
   photoHashOf,
   estimateCarbon,
   exportBundle,
+  importBundle,
   publish,
   publishedIds,
   type GardenObservation,
   type Measure,
 } from '../../grove/web/store'
+import { readJsonFile, shareJson } from '../lib/share'
 import { anchorCall, plotLiveCount, readPlotStatus, type CsbPlotStatus } from '../../grove/core/csb'
 
 /**
@@ -25,6 +27,7 @@ interface SpeciesInfo {
   id: string
   en: string
   km: string
+  /** Binomial name, shown alongside the common name so a verifier can confirm the pick. */
   scientific?: string
 }
 const SPECIES_LIST: SpeciesInfo[] = [
@@ -67,16 +70,21 @@ const GENERIC_DENSITY_SPECIES = new Set([
 ])
 /** Where the optional CSB read endpoint is remembered. Empty = chain off. */
 const CSB_KEY = 'grove.csb.base.v1'
+
+/** Full combobox label: common name + scientific name, e.g. "Mango (Mangifera indica)".
+ *  Falls back to the raw value for a typed species not in the list. */
 function speciesLabel(idOrText: string, km: boolean): string {
   const found = SPECIES_LIST.find((s) => s.id === idOrText)
   if (!found) return idOrText
   const name = km ? found.km : found.en
   return found.scientific ? `${name} (${found.scientific})` : name
 }
+/** Compact label for the records list — common name only, no scientific name. */
 function speciesShortLabel(idOrText: string, km: boolean): string {
   const found = SPECIES_LIST.find((s) => s.id === idOrText)
   return found ? (km ? found.km : found.en) : idOrText
 }
+/** Species matching a search term against common (either language) or scientific name. */
 function matchSpecies(query: string): SpeciesInfo[] {
   const q = query.trim()
   if (!q) return SPECIES_LIST
@@ -84,14 +92,15 @@ function matchSpecies(query: string): SpeciesInfo[] {
   return SPECIES_LIST
     .map((s) => {
       const enLower = s.en.toLowerCase()
-      const scientific = (s.scientific ?? '').toLowerCase()
-      const score = enLower.startsWith(qLower) || s.km.startsWith(q) ? 2 :
-        enLower.includes(qLower) || s.km.includes(q) || scientific.includes(qLower) ? 1 : 0
+      const sciLower = (s.scientific ?? '').toLowerCase()
+      let score = 0
+      if (enLower.startsWith(qLower) || s.km.startsWith(q)) score = 2
+      else if (enLower.includes(qLower) || s.km.includes(q) || sciLower.includes(qLower)) score = 1
       return { s, score }
     })
-    .filter((item) => item.score > 0)
+    .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
-    .map((item) => item.s)
+    .map((x) => x.s)
 }
 
 export function GardenView() {
@@ -118,6 +127,7 @@ export function GardenView() {
   const [publishing, setPublishing] = useState(false)
   const [publishMsg, setPublishMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const importRef = useRef<HTMLInputElement>(null)
 
   const unpublished = useMemo(() => obs.filter((o) => !published.has(o.id)).length, [obs, published])
 
@@ -181,10 +191,15 @@ export function GardenView() {
     return { method: 'manual', biomassKg: 0 }
   }, [dbh, height])
 
+  // Re-label the box on a language toggle — but only for a recognized species;
+  // a custom typed name has no translation to switch to.
   useEffect(() => {
-    if (SPECIES_LIST.some((item) => item.id === species)) setSpeciesQuery(speciesLabel(species, km))
+    if (SPECIES_LIST.some((s) => s.id === species)) setSpeciesQuery(speciesLabel(species, km))
   }, [km, species])
 
+  // While the box still shows the selected species' own label untouched, browsing
+  // should surface the full list — matching that literal "Name (Scientific)" string
+  // against the bare names would otherwise return no results.
   const speciesMatches = useMemo(
     () => matchSpecies(speciesQuery === speciesLabel(species, km) ? '' : speciesQuery),
     [speciesQuery, species, km],
@@ -196,17 +211,25 @@ export function GardenView() {
     setSpeciesOpen(false)
   }
 
+  /** Resolve free-typed text on blur/Enter: snap to an exact name match, else keep it as a custom species. */
   function commitSpeciesQuery() {
-    const query = speciesQuery.trim()
-    if (!query) { setSpeciesQuery(speciesLabel(species, km)); return }
-    if (query === speciesLabel(species, km) || query === speciesLabel(species, !km)) return
-    const queryLower = query.toLowerCase()
-    const exact = SPECIES_LIST.find((item) =>
-      item.en.toLowerCase() === queryLower || item.km === query ||
-      speciesLabel(item.id, true) === query || speciesLabel(item.id, false).toLowerCase() === queryLower,
+    const q = speciesQuery.trim()
+    if (!q) { setSpeciesQuery(speciesLabel(species, km)); return }
+    // Already showing the selected species' own label (either language) — nothing to resolve.
+    // Without this check, re-committing on a stray blur (e.g. clicking the language
+    // toggle while the field still has focus) would treat "Guava (Psidium guajava)"
+    // as unrecognized free text and overwrite a valid `guava` pick with that whole string.
+    if (q === speciesLabel(species, km) || q === speciesLabel(species, !km)) return
+    const qLower = q.toLowerCase()
+    const exact = SPECIES_LIST.find(
+      (s) =>
+        s.en.toLowerCase() === qLower ||
+        s.km === q ||
+        speciesLabel(s.id, true) === q ||
+        speciesLabel(s.id, false).toLowerCase() === qLower,
     )
     if (exact) selectSpecies(exact.id)
-    else setSpecies(query)
+    else setSpecies(q)
   }
 
   const est = useMemo(() => {
@@ -278,13 +301,27 @@ export function GardenView() {
     setPublishing(false)
   }
 
-  function download() {
-    const blob = new Blob([exportBundle()], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'grove-garden.json'
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  async function shareBundle() {
+    setPublishMsg('')
+    const how = await shareJson('grove-garden.json', exportBundle())
+    if (how === 'downloaded') setPublishMsg(km ? 'បានទាញយកឯកសារ' : 'File downloaded')
+  }
+
+  async function onImport(file: File | null) {
+    if (!file) return
+    setPublishMsg('')
+    try {
+      const r = await importBundle(await readJsonFile(file))
+      setObs(loadObservations())
+      setPublished(publishedIds())
+      setPublishMsg(
+        km
+          ? `នាំចូល៖ បន្ថែម ${r.added} · ស្ទួន ${r.duplicate}${r.invalid ? ` · មិនត្រឹមត្រូវ ${r.invalid}` : ''}`
+          : `Imported: ${r.added} added · ${r.duplicate} dup${r.invalid ? ` · ${r.invalid} invalid` : ''}`,
+      )
+    } catch {
+      setPublishMsg(km ? 'ឯកសារមិនត្រឹមត្រូវ' : 'Not a valid Grove bundle')
+    }
   }
 
   return (
@@ -405,9 +442,31 @@ export function GardenView() {
             </div>
           </section>
 
+          {/*
+            The number has four components and only the biomass model is a
+            published one: Chave et al. (2014) Eq. 4 for AGB, an UNRESOLVED
+            carbon fraction, 44/12 stoichiometry, and our own wood-density table.
+            When height was not measured the biomass model is ours too, so the
+            label has to say which of the two ran. Deliberately no "IPCC" here
+            while that attribution is unverified — docs/REFERENCES.md §3.
+          */}
           <div className="garden-est">
             ≈ <b>{est.total}</b> kg CO₂ {count > 1 ? <small>({est.per} × {count})</small> : null}
           </div>
+          <p className="garden-est-note">
+            {measure.method === 'dbh_height'
+              ? km
+                ? 'ការប៉ាន់ស្មាន — Chave et al. (2014) សមីការទី 4។ មិនមែនជាក្រេឌីតសម្រាប់ជួញដូរឡើយ។'
+                : 'Estimate — Chave et al. (2014) Eq. 4. Never a tradable credit.'
+              : km
+                ? 'ការប៉ាន់ស្មានប្រហាក់ប្រហែល — មិនបានវាស់កម្ពស់ ប្រើរូបមន្តផ្ទៃក្នុង។ មិនមែនជាក្រេឌីតសម្រាប់ជួញដូរឡើយ។'
+                : 'Rough estimate — height not measured, in-house approximation. Never a tradable credit.'}
+            {' '}
+            <a href="https://github.com/sengtha/iAny/blob/main/docs/REFERENCES.md"
+               target="_blank" rel="noreferrer">
+              {km ? 'របៀបគណនា' : 'How this is calculated'}
+            </a>
+          </p>
 
           <label className="voice-field">
             <span>{km ? 'សួន (plot)' : 'Plot'}</span>
@@ -444,7 +503,14 @@ export function GardenView() {
               <button className="voice-ghost small" onClick={onPublish} disabled={publishing || unpublished === 0}>
                 {publishing ? '…' : `🌐 ${km ? 'ផ្សព្វផ្សាយ' : 'Publish'}${unpublished > 0 ? ` (${unpublished})` : ''}`}
               </button>
-              <button className="voice-ghost small" onClick={download}>⬇ {km ? 'នាំចេញ JSON' : 'Export JSON'}</button>
+              <button className="voice-ghost small" onClick={() => void shareBundle()}>
+                📤 {km ? 'ចែករំលែក' : 'Share'}
+              </button>
+              <button className="voice-ghost small" onClick={() => importRef.current?.click()}>
+                📥 {km ? 'នាំចូល' : 'Import'}
+              </button>
+              <input ref={importRef} type="file" accept="application/json,.json" style={{ display: 'none' }}
+                onChange={(e) => { const f = e.target.files?.[0]; void onImport(f ?? null); e.target.value = '' }} />
             </div>
           </div>
           {publishMsg ? <p className="garden-publish-msg">{publishMsg}</p> : null}
@@ -465,10 +531,21 @@ export function GardenView() {
           <b>⛓ {km ? 'ចងភ្ជាប់លើ CSB' : 'Anchor on CSB'}</b>
           <small>{km ? 'ស្រេចចិត្ត' : 'optional'}</small>
         </div>
+        {/*
+          The plot name is hashed on this device and never sent as text, but the
+          hash IS public on chain, and plot names are short and speakable because
+          a verifier types one standing in a field. A wordlist crossed with a
+          two-digit index recovers most of them in seconds, and liveCount and
+          species sit beside the hash in the same anchor. So this panel no longer
+          says the name is safe; it says what is true and tells her what to do
+          about it today. The real fix is a salted commitment in grove/core/csb.ts
+          (plotId = keccak256(plot ‖ salt)), which changes the derivation in three
+          repositories and is deliberately not part of this copy change.
+        */}
         <p className="garden-chain-lead">
           {km
-            ? 'ហត្ថលេខាបញ្ជាក់ថា “នរណានិយាយ” មិនមែន “ពិតឬអត់”។ ការចងភ្ជាប់បន្ថែមកាលបរិច្ឆេទដែលអ្នកដទៃយល់ព្រម និងកន្លែងឲ្យអ្នកផ្ទៀងផ្ទាត់មានអាជ្ញាបណ្ណដាក់ឈ្មោះ។ មានតែ hash ទេដែលចេញទៅ។'
-            : 'A signature proves who said something, never that it is true. Anchoring adds a date somebody else agrees with, and a place a licensed field verifier can put their name. Only the hash leaves this phone — never the plot name, the photo, or your location.'}
+            ? 'ហត្ថលេខាបញ្ជាក់ថា “នរណានិយាយ” មិនមែន “ពិតឬអត់”។ ការចងភ្ជាប់បន្ថែមកាលបរិច្ឆេទដែលអ្នកដទៃយល់ព្រម និងកន្លែងឲ្យអ្នកផ្ទៀងផ្ទាត់មានអាជ្ញាបណ្ណដាក់ឈ្មោះ។ មានតែ hash ទេដែលចេញពីទូរស័ព្ទនេះ — រូបថត ទីតាំង និងសោឧបករណ៍ មិនចេញឡើយ។ ឈ្មោះសួនក៏ផ្ញើជា hash ដែរ ប៉ុន្តែឈ្មោះខ្លីធម្មតា អាចមានគេទាយចេញពី hash នោះបាន។ ដូច្នេះសូមជ្រើសឈ្មោះសួនណាដែលអ្នកមិនខ្វល់ បើមានមនុស្សចម្លែកដឹង។'
+            : 'A signature proves who said something, never that it is true. Anchoring adds a date somebody else agrees with, and a place a licensed field verifier can put their name. Only hashes leave this phone — never the photo, never your location, never your device key. The plot name is sent as a hash too, but a short everyday name can be worked back out of that hash by someone who tries, so pick a plot name you would not mind a stranger guessing.'}
         </p>
 
         <label className="voice-field">

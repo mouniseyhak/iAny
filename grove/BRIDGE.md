@@ -9,9 +9,15 @@ the **read contract** between them. It is intentionally small: CamboVerse needs 
 special privilege, no API key, and no trust in iany.app — it reads the same public,
 signed records anyone can, and it can **verify every one for itself**.
 
-> Honest scope: `co2Kg` is an **estimate** from published allometry (Chave et al.
-> 2014), never a certified carbon credit. The virtual world should render it as
-> "estimated CO₂ captured", not a tradable asset. See [SPEC.md](./SPEC.md) §7.
+> Honest scope: `co2Kg` is an **estimate**, never a certified carbon credit. The
+> virtual world should render it as "estimated CO₂ captured", not a tradable
+> asset. Do not label it "Chave allometry" as this note once did: the figure is
+> four components multiplied, and only the biomass model is published (Chave et
+> al. 2014, **Eq. 4**). The carbon fraction's attribution is **unresolved**, the
+> wood-density table is ours, and when height was not measured the biomass step
+> is ours too. See [SPEC.md](./SPEC.md) §7 and
+> [`docs/REFERENCES.md`](../docs/REFERENCES.md), which records each component and
+> what it rests on.
 
 > **Build against real data now.** [`fixtures/`](./fixtures) has genuinely
 > device-signed sample records that verify with the reference verifier — an
@@ -127,8 +133,13 @@ both of which matter the moment money is attached to a grove surviving.
 [ANCHORING.md](./ANCHORING.md) describes an **optional** path: commit a record's
 content hash to [CSB](https://github.com/sengtha/CSB), where a block timestamp
 replaces the phone's clock and confirmations count only from **licensed** field
-verifiers. Only the hash and `keccak256(plot)` are sent — never the plot name,
-GPS, photo, or device key.
+verifiers. Only hashes are sent: the GPS, the photo and the device key never
+reach the chain at all, and the plot name is never sent as text — but it is sent
+as `keccak256(plot)`, and a short everyday name can be worked back out of that
+hash by anyone who tries. **Do not tell your users the chain cannot learn a
+grove's name.** It is a bound on what is transmitted, not a privacy guarantee,
+and iAny's own publish worker serves the name in clear for any published record.
+See CSB `3245244`.
 
 CamboVerse reads that status alongside the signed records and shows it as a
 provenance tier on each plot (`✓ verified by a licensed field verifier` /

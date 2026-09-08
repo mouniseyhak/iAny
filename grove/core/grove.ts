@@ -48,7 +48,10 @@ export interface GardenObservation {
   measure: Measure
   /** Estimated above-ground biomass, kg (total, i.e. per-plant × count). */
   biomassKg: number
-  /** Estimated CO₂e sequestered, kg (biomass × 0.47 carbon × 3.67 CO₂/C). */
+  /**
+   * Estimated CO₂e sequestered, kg (biomass × 0.47 carbon × 3.6667 CO₂/C).
+   * Four components, only one of them a published model — docs/REFERENCES.md.
+   */
   co2Kg: number
   /** WHERE (physical) — optional GPS claim. */
   gps: { lat: number; lng: number; acc: number } | null
@@ -90,13 +93,38 @@ export interface VerifyResult {
 
 /* ----------------------------------------------------------- constants --- */
 
-/** Carbon fraction of dry biomass (IPCC default). */
+/**
+ * Carbon fraction of dry biomass.
+ *
+ * ATTRIBUTION UNRESOLVED — do not repeat "IPCC default" without checking, which
+ * is what this comment used to say and what got us here. What is known: no
+ * source for 0.47 exists anywhere in this repo or its history (`git log -S
+ * CARBON_FRACTION` returns only the initial Grove commit, whose message sources
+ * the allometry and not this). The 2006 IPCC Guidelines Vol. 4 Ch. 4 do contain
+ * Table 4.3, "Carbon fraction of aboveground forest biomass", at page 4.48 — but
+ * nobody has read its rows, so it is NOT established that 0.47 is its tropical
+ * value, and a worked example in the same chapter applies 0.47 to a TEMPERATE
+ * CONTINENTAL zone. Vol. 4 Ch. 2 (Generic) is unchecked and is the more natural
+ * home for a generic default. Whether the 2019 Refinement supersedes Table 4.3
+ * is unchecked.
+ *
+ * Independent of any of that: every candidate source is about FOREST biomass,
+ * and we apply this to a home garden — mango, jackfruit, durian, pomelo, lime.
+ * Even if the number is right, the scope of the attribution is wrong.
+ *
+ * docs/REFERENCES.md §3 records the full state and how to close it.
+ */
 export const CARBON_FRACTION = 0.47
-/** CO₂ per unit carbon (44/12). */
+/** CO₂ per unit carbon: molar mass 44/12 = 3.6667. Stoichiometry, not a citation. */
 export const CO2_PER_C = 3.6667
 /** Fallback wood density g/cm³ when species is unknown. */
 export const DEFAULT_WOOD_DENSITY = 0.6
-/** Common Cambodian garden species (g/cm³). Species without a listed value use the conservative default. */
+/**
+ * Common Cambodian garden species (g/cm³, approximate basic specific gravity —
+ * average published values per species, not a per-tree measurement). Extend freely;
+ * keys must match the species ids in src/views/GardenView.tsx's SPECIES_LIST.
+ * Species without a listed value use the conservative default.
+ */
 export const WOOD_DENSITY: Record<string, number> = {
   mango: 0.52,
   jackfruit: 0.6,
@@ -105,10 +133,10 @@ export const WOOD_DENSITY: Record<string, number> = {
   tamarind: 0.8,
   longan: 0.62,
   guava: 0.66,
-  banana: 0.3,
+  banana: 0.3, // herbaceous pseudostem, mostly water
   rambutan: 0.6,
   durian: 0.4,
-  papaya: 0.2,
+  papaya: 0.2, // soft, pithy, hollow stem
   pomelo: 0.7,
   lime: 0.7,
   'star-fruit': 0.55,

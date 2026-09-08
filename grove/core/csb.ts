@@ -15,11 +15,16 @@
  *   that a tree was standing in July. A block timestamp is agreed by a validator
  *   set that has never met the grower.
  *
- * ONLY THE HASH IS SENT. `observationId` is the record's own SHA-256 content
- * hash and `plotId` is keccak256 of the plot string, so the chain learns neither
- * the garden's name, its coordinates, the photo, nor the device key. A farmer's
- * fruit trees are worth stealing, and a permissioned national chain is still
- * readable by everyone on it.
+ * ONLY HASHES ARE SENT, WHICH IS NOT THE SAME AS PRIVACY. `observationId` is the
+ * record's own SHA-256 content hash and `plotId` is keccak256 of the plot string,
+ * so the coordinates, the photo and the device key genuinely never reach the
+ * chain — those three are unconditional. The garden's NAME is different: the
+ * chain never receives it as text, but a plot name is short and speakable by
+ * necessity, so it is recoverable FROM an anchored `plotId` by anyone who tries.
+ * See the note on `plotKey` below, which states the limit and the fix, and CSB
+ * `3245244`. A farmer's fruit trees are worth stealing, and a permissioned
+ * national chain is still readable by everyone on it — which is the reason to be
+ * exact here rather than reassuring.
  *
  * TWO DIFFERENT KEYS, deliberately. Grove's device identity is an ECDSA P-256
  * key that never leaves the phone and signs the record. A CSB transaction is
@@ -122,7 +127,28 @@ export function keccak256(text: string): string {
 
 /* ------------------------------------------------------------------ keys */
 
-/** The 32-byte key CSB files a plot under. The plot STRING never goes on chain. */
+/**
+ * The 32-byte key CSB files a plot under. The plot STRING never goes on chain.
+ *
+ * That is NOT the same as the plot's name being private, and as of this writing
+ * the interface no longer claims it is. Plot names have to be short, memorable
+ * and speakable, because a verifier types one into a phone while standing in a
+ * field — `home-garden-01`, `plot/peam-krasop/mangrove-01` are our own examples.
+ * A wordlist of plausible names crossed with a two-digit index is a few million
+ * candidates, which is seconds of hashing against the anchored plotIds. Beside
+ * the liveCount and species committed in the same anchor, what that recovers is
+ * an addressable inventory of a grower's most stealable assets. Hashing here
+ * keeps the name from OUR server; it does nothing about a hash published on a
+ * ledger every permitted party can read.
+ *
+ * The fix is a salted commitment — plotId = keccak256(plot ‖ salt), salt held on
+ * the device and disclosed to a verifier on the visit. It is deliberately NOT
+ * done here: it changes this derivation, the lookup path in every consumer that
+ * resolves a name to a plot, and the recovery story when a phone is lost, so it
+ * is a change across three repositories rather than a line edit. Until it lands,
+ * the grower- and verifier-facing pages state the limit and advise picking an
+ * unguessable name.
+ */
 export const plotKey = keccak256;
 
 /** A Grove observation id (64 hex chars) as a 0x-prefixed bytes32. */

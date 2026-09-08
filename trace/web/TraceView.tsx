@@ -1,14 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTraceCaps } from './context'
 import type { SttState } from './adapters'
+import { fetchCustody, fetchPartner, type CustodyItem, type PartnerProof } from './companion'
+import { shareJson } from '../../src/lib/share'
+import { qrSvg } from '../../src/lib/qr'
 import {
   addAttestation,
   capsuleId,
+  claimAlias,
+  resolveAlias,
   checkCapsule,
   complianceReport,
+  buildPlot,
   computeTrust,
+  eudrCoord,
+  eudrNeedsPolygon,
   EVENT_TYPES,
   fetchAttestations,
+  fetchChain,
   fetchPage,
   photoSignature,
   proofTier,
@@ -22,6 +31,7 @@ import {
   type Tier,
   type FreshCapture,
   type PhotoSig,
+  type PlotGeometry,
   type RegistryInfo,
   type TraceCapsule,
   type VerifyResult,
@@ -44,15 +54,19 @@ export function TraceView({ lang }: { lang: 'en' | 'km' }) {
   const [pageState, setPageState] = useState<'off' | 'loading' | 'ready' | 'missing'>('off')
 
   useEffect(() => {
-    const id = new URLSearchParams(location.search).get('p')
-    if (!id || !/^[0-9a-f]{64}$/.test(id)) return
-    setPageId(id)
+    const p = new URLSearchParams(location.search).get('p')
+    if (!p) return
     setPageState('loading')
-    void fetchPage(id).then((c) => {
+    void (async () => {
+      // `p` is either a capsule id or a short product slug (kampot-pepper-2026-04).
+      const id = /^[0-9a-f]{64}$/.test(p) ? p : await resolveAlias(p)
+      if (!id) { setPageState('missing'); return }
+      setPageId(id)
+      const c = await fetchPage(id)
       setPageCapsule(c)
       setPageState(c ? 'ready' : 'missing')
-    })
-    void fetchAttestations(id).then(setPageAtt)
+      void fetchAttestations(id).then(setPageAtt)
+    })()
   }, [])
 
   if (pageState !== 'off') {
@@ -85,6 +99,8 @@ export function TraceView({ lang }: { lang: 'en' | 'km' }) {
       </div>
 
       {mode === 'create' ? <Create L={L} /> : mode === 'verify' ? <Verify L={L} /> : <Journey L={L} />}
+
+      {mode !== 'journey' ? <PartnerCallout L={L} /> : null}
 
       {/* Journey / compliance is an exporter feature — tucked away, not a top tab. */}
       {mode === 'journey' ? (
@@ -172,6 +188,7 @@ function Create({ L }: { L: LFn }) {
   const [witness, setWitness] = useState('')
   const [note, setNote] = useState('')
   const [gps, setGps] = useState<{ lat: number; lng: number; acc: number } | null>(null)
+  const [plot, setPlot] = useState<PlotGeometry | null>(null)
   const [busy, setBusy] = useState(false)
   const [capsule, setCapsule] = useState<TraceCapsule | null>(null)
   const [reg, setReg] = useState<RegistryInfo | null>(null)
@@ -197,7 +214,7 @@ function Create({ L }: { L: LFn }) {
 
   function locate() {
     navigator.geolocation?.getCurrentPosition(
-      (p) => setGps({ lat: +p.coords.latitude.toFixed(5), lng: +p.coords.longitude.toFixed(5), acc: Math.round(p.coords.accuracy) }),
+      (p) => setGps({ lat: eudrCoord(p.coords.latitude), lng: eudrCoord(p.coords.longitude), acc: Math.round(p.coords.accuracy) }),
       () => setGps(null),
       { enableHighAccuracy: true, timeout: 8000 },
     )
@@ -213,6 +230,7 @@ function Create({ L }: { L: LFn }) {
         capturedAt: new Date().toISOString(),
         producer, product, note, witness,
       },
+      ...(plot && plot.points.length ? { plot } : {}),
       event: { type: eventType, step: (prev?.step ?? 0) + 1 },
       prev: prev?.id ?? null,
     }
@@ -221,14 +239,11 @@ function Create({ L }: { L: LFn }) {
     setBusy(false)
   }
 
-  function download() {
+  async function download() {
     if (!capsule) return
-    const blob = new Blob([JSON.stringify(capsule)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `trace-${capsule.id.slice(0, 8)}.json`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    // Share the signed proof file to any channel (Bluetooth / Nearby / AirDrop /
+    // messenger); falls back to a download. The receiver verifies it offline.
+    await shareJson(`trace-${capsule.id.slice(0, 8)}.json`, capsule)
   }
 
   if (capsule) {
@@ -238,17 +253,18 @@ function Create({ L }: { L: LFn }) {
         <h3>{L('Proof created', 'បង្កើតភស្តុតាងរួចរាល់')}</h3>
         <TierBadge tier={tierFromCapsule(capsule)} L={L} />
         <p className="trace-id">ID: {capsule.id.slice(0, 16)}…</p>
+        <CapsuleIdQr id={capsule.id} L={L} />
         <div className="trace-thumbs">
           {capsule.match.photos.map((p, i) => (
             <img key={i} src={p.thumb} alt="" />
           ))}
         </div>
-        <button className="voice-primary big" onClick={download}>
-          ⬇ {L('Save proof file', 'រក្សាទុកឯកសារភស្តុតាង')}
+        <button className="voice-primary big" onClick={() => void download()}>
+          📤 {L('Share proof file', 'ចែករំលែកឯកសារភស្តុតាង')}
         </button>
         <p className="voice-tip">
-          {L('Send this file with the product (share, Bluetooth, upload). The receiver verifies it offline.',
-             'ផ្ញើឯកសារនេះជាមួយផលិតផល (ចែករំលែក ប៊្លូធូស អាប់ឡូត)។ អ្នកទទួលអាចផ្ទៀងផ្ទាត់ក្រៅបណ្ដាញ។')}
+          {L('Send this file with the product (Bluetooth, Nearby/AirDrop, any app). The receiver verifies it offline — no internet needed.',
+             'ផ្ញើឯកសារនេះជាមួយផលិតផល (ប៊្លូធូស Nearby/AirDrop កម្មវិធីណាមួយ)។ អ្នកទទួលផ្ទៀងផ្ទាត់ក្រៅបណ្ដាញ — មិនត្រូវការអ៊ីនធឺណិត។')}
         </p>
         {reg?.firstSeen ? (
           <p className="voice-tip">✓ {L('Registered online', 'ចុះបញ្ជីលើបណ្ដាញ')}: {new Date(reg.firstSeen).toLocaleString()}</p>
@@ -257,13 +273,10 @@ function Create({ L }: { L: LFn }) {
             🌐 {L('Register online (optional, trusted timestamp)', 'ចុះបញ្ជីលើបណ្ដាញ (ស្រេចចិត្ត ពេលវេលាដែលទុកចិត្ត)')}
           </button>
         )}
+        <PartnerHandoffLink capsuleId={capsule.id} L={L} />
+
         {pageUrl ? (
-          <div className="trace-share">
-            <div className="trace-share-url">{location.origin}{pageUrl}</div>
-            <button className="voice-ghost" onClick={() => void navigator.clipboard?.writeText(location.origin + pageUrl)}>
-              ⧉ {L('Copy public link', 'ចម្លងតំណសាធារណៈ')}
-            </button>
-          </div>
+          <ShareLink capsuleId={capsule.id} pageUrl={pageUrl} L={L} />
         ) : (
           <button className="voice-ghost" onClick={async () => setPageUrl(await publishCapsule(capsule))}>
             🔗 {L('Publish shareable page (for buyers)', 'ផ្សាយទំព័រចែករំលែក (សម្រាប់អ្នកទិញ)')}
@@ -372,6 +385,14 @@ function Create({ L }: { L: LFn }) {
             <button className="voice-ghost" onClick={locate}>📍 {L('Add location', 'បញ្ចូលទីតាំង')}</button>
             {gps && <span>{gps.lat}, {gps.lng} (±{gps.acc}m)</span>}
           </div>
+        </div>
+      </details>
+
+      {/* Exporting to the EU? EUDR wants the farm plot mapped, not just a pin. */}
+      <details className="trace-more">
+        <summary>🌍 {L('Farm plot for EU export', 'ដីចម្ការសម្រាប់នាំចេញទៅ EU')} <span>EUDR</span></summary>
+        <div className="trace-more-body">
+          <PlotWalker plot={plot} onPlot={setPlot} L={L} />
         </div>
       </details>
 
@@ -705,6 +726,8 @@ function ProvenancePage({
           </div>
         )}
 
+        <FullJourney id={id} L={L} />
+
         <button className="voice-primary big" onClick={() => setVerifying(true)}>
           ✓ {L('Verify this product yourself', 'ផ្ទៀងផ្ទាត់ផលិតផលនេះដោយខ្លួនឯង')}
         </button>
@@ -717,6 +740,322 @@ function ProvenancePage({
         </p>
       </div>
     </div>
+  )
+}
+
+/**
+ * Explains the third role. Trace is the entry point: a **maker** creates the
+ * proof here and a **buyer** checks it here — but the product also passes through
+ * delivery companies, warehouses and exporters, and they add their own signed
+ * links to the same chain in the companion console (/custody). One product, one
+ * journey; this is the door to the partner half of it.
+ */
+/** The raw capsule id as a QR — for any tool/partner that wants the id itself
+ *  (the partner link below is the friendlier route for delivery staff). */
+function CapsuleIdQr({ id, L }: { id: string; L: LFn }) {
+  const [open, setOpen] = useState(false)
+  if (!open) {
+    return (
+      <button className="voice-ghost small" onClick={() => setOpen(true)}>
+        ▦ {L('Show product ID as QR', 'បង្ហាញលេខសម្គាល់ជា QR')}
+      </button>
+    )
+  }
+  return (
+    <div className="qr-show">
+      <div className="handoff-qr" dangerouslySetInnerHTML={{ __html: qrSvg(id) }} />
+      <div className="qr-show-actions">
+        <button className="voice-ghost small" onClick={() => void navigator.clipboard?.writeText(id)}>
+          ⧉ {L('Copy ID', 'ចម្លងលេខសម្គាល់')}
+        </button>
+        <button className="voice-ghost small" onClick={() => setOpen(false)}>
+          ✕ {L('Hide', 'បិទ')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The concrete Trace → Custody link: hand the driver/warehouse a QR that opens
+ * the partner console with **this capsule already filled in**, so they never have
+ * to type a 64-hex id. Collapsed by default — it's for the moment of handover.
+ */
+function PartnerHandoffLink({ capsuleId: id, L }: { capsuleId: string; L: LFn }) {
+  const [open, setOpen] = useState(false)
+  const url = `${location.origin}/custody?c=${id}`
+  if (!open) {
+    return (
+      <button className="voice-ghost" onClick={() => setOpen(true)}>
+        🚚 {L('Hand to a delivery partner', 'ប្រគល់ទៅដៃគូដឹកជញ្ជូន')}
+      </button>
+    )
+  }
+  return (
+    <div className="trace-share">
+      <div className="handoff-qr" dangerouslySetInnerHTML={{ __html: qrSvg(url) }} />
+      <p className="voice-minor-note">
+        {L('The driver or warehouse scans this — the partner console opens with this product already filled in, ready for them to sign the handoff.',
+           'អ្នកបើកបរ ឬឃ្លាំងស្កេនវា — កុងសូលដៃគូបើកឡើងដោយមានផលិតផលនេះរួចរាល់ ដើម្បីចុះហត្ថលេខាលើការប្រគល់។')}
+      </p>
+      <button className="voice-ghost" onClick={() => void navigator.clipboard?.writeText(url)}>
+        ⧉ {L('Copy partner link', 'ចម្លងតំណដៃគូ')}
+      </button>
+    </div>
+  )
+}
+
+function PartnerCallout({ L }: { L: LFn }) {
+  return (
+    <div className="trace-partner-callout">
+      <h3>🚚 {L('Moving the product? Add your link to the chain', 'ដឹកជញ្ជូនផលិតផល? បន្ថែមតំណរបស់អ្នក')}</h3>
+      <p>
+        {L('A maker creates the proof and a buyer checks it — here. In between, the delivery company, warehouse or exporter each sign the handoffs they take part in. Those signed steps join the same product journey and show up on its page.',
+           'អ្នកផលិតបង្កើតភស្តុតាង ហើយអ្នកទិញពិនិត្យ — នៅទីនេះ។ ចន្លោះនោះ ក្រុមហ៊ុនដឹកជញ្ជូន ឃ្លាំង ឬអ្នកនាំចេញ ចុះហត្ថលេខាលើការប្រគល់នីមួយៗ។ ជំហានទាំងនោះចូលរួមក្នុងដំណើរតែមួយ ហើយបង្ហាញនៅលើទំព័ររបស់វា។')}
+      </p>
+      <a className="voice-ghost" href="/custody">
+        {L('Open the partner console', 'បើកកុងសូលដៃគូ')} →
+      </a>
+    </div>
+  )
+}
+
+/**
+ * The public link for a journey: a QR + URL a buyer can scan. The maker can
+ * claim a short, human-friendly slug (kampot-pepper-2026-04) that stays the SAME
+ * as later steps are added — so a label printed once keeps working, and the link
+ * always opens the full journey.
+ */
+function ShareLink({ capsuleId: id, pageUrl, L }: { capsuleId: string; pageUrl: string; L: LFn }) {
+  const [slug, setSlug] = useState('')
+  const [shortUrl, setShortUrl] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const url = location.origin + (shortUrl ?? pageUrl)
+
+  async function claim() {
+    const s = slug.trim().toLowerCase()
+    if (!s) return
+    setBusy(true); setErr('')
+    const r = await claimAlias(s, id)
+    setBusy(false)
+    if (r.ok) setShortUrl(r.url)
+    else setErr(r.error === 'taken'
+      ? L('That name is already taken — try another.', 'ឈ្មោះនេះមានគេប្រើហើយ — សូមប្តូរ។')
+      : r.error === 'offline'
+        ? L('You are offline.', 'អ្នកនៅក្រៅបណ្ដាញ។')
+        : L('Use 3-40 letters, numbers or dashes.', 'ប្រើ ៣-៤០ តួ អក្សរ លេខ ឬសញ្ញា -។'))
+  }
+
+  return (
+    <div className="trace-share">
+      <div className="handoff-qr" dangerouslySetInnerHTML={{ __html: qrSvg(url) }} />
+      <p className="voice-minor-note">
+        {L('Buyer scans to see the full journey online', 'អ្នកទិញស្កេនដើម្បីមើលដំណើរពេញលើបណ្ដាញ')}
+      </p>
+      <div className="trace-share-url">{url}</div>
+      <button className="voice-ghost" onClick={() => void navigator.clipboard?.writeText(url)}>
+        ⧉ {L('Copy public link', 'ចម្លងតំណសាធារណៈ')}
+      </button>
+
+      {shortUrl ? (
+        <p className="voice-minor-note">
+          ✓ {L('Short link claimed. Print it once — it keeps working as you add steps.',
+                'បានយកតំណខ្លី។ បោះពុម្ពម្តង — វានៅតែដំណើរការពេលបន្ថែមជំហាន។')}
+        </p>
+      ) : (
+        <div className="trace-slug">
+          <label className="voice-field">
+            <span>{L('Short link (optional, stable)', 'តំណខ្លី (ស្រេចចិត្ត ថេរ)')}</span>
+            <div className="trace-slug-row">
+              <span className="trace-slug-pre">/trace?p=</span>
+              <input type="text" value={slug} maxLength={40} placeholder="kampot-pepper-2026-04"
+                onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} />
+            </div>
+          </label>
+          <button className="voice-ghost" onClick={() => void claim()} disabled={busy || !slug.trim()}>
+            🔖 {busy ? '…' : L('Claim short link', 'យកតំណខ្លី')}
+          </button>
+          {err ? <p className="voice-error">{err}</p> : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One custody/handoff event row (shared by the single view and the journey). */
+function CustodyRow({ it, L }: { it: CustodyItem; L: LFn }) {
+  // A tick alone is unearned authority — show HOW the company was verified, and
+  // let the reader open the partner page to audit the evidence themselves.
+  const [proofs, setProofs] = useState<PartnerProof[] | null>(null)
+  useEffect(() => {
+    if (it.companyKey && it.company?.verified) {
+      void fetchPartner(it.companyKey).then((p) => setProofs(p?.proofs ?? []))
+    }
+  }, [it.companyKey, it.company?.verified])
+  const how = proofs?.[0]
+  return (
+    <div className="custody-row">
+      <div className="custody-row-top">
+        <b>{it.event}</b> · {it.role}
+        {it.company ? (
+          <span className={`custody-tag ${it.company.verified ? 'ok' : ''}`}>
+            {it.company.verified ? '✓ ' : ''}{it.company.name}
+            {how ? (
+              <em className="custody-how">
+                {how.method === 'domain' ? ` · 🌐 ${how.evidence}`
+                  : how.method === 'peer' ? ` · 🤝 ${how.detail || L('vouched', 'បានធានា')}`
+                    : ` · 🏛️ ${how.evidence}`}
+              </em>
+            ) : null}
+          </span>
+        ) : (
+          <span className="custody-tag self">{L('self-claimed', 'ដោយខ្លួនឯង')}</span>
+        )}
+      </div>
+      <div className="custody-row-sub">
+        {it.actorName ? `${it.actorName} · ` : ''}
+        {new Date(it.createdAt).toLocaleString()}
+        {it.lat != null ? ` · ~${it.lat.toFixed(2)}, ${it.lng?.toFixed(2)}` : ''}
+      </div>
+      {it.note ? <div className="custody-row-note">{it.note}</div> : null}
+    </div>
+  )
+}
+
+/**
+ * The **whole journey in one view** — the point of a single shareable link.
+ * Walks the hash-linked chain (any step's id resolves the full story), then
+ * renders every production step in order with its custody/handoff events nested,
+ * plus a tamper-evident ✓/⚠ from re-hashing the chain. Falls back to a plain
+ * custody list when a product has no multi-step journey.
+ */
+function FullJourney({ id, L }: { id: string; L: LFn }) {
+  const [chain, setChain] = useState<TraceCapsule[] | null>(null)
+  const [custody, setCustody] = useState<Record<string, CustodyItem[]>>({})
+  const [check, setCheck] = useState<ChainResult | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      const caps = await fetchChain(id)
+      // Aggregate custody across every capsule id in the journey.
+      const ids = caps && caps.length ? caps.map((c) => c.id) : [id]
+      const pairs = await Promise.all(ids.map(async (cid) => [cid, await fetchCustody(cid)] as const))
+      setCustody(Object.fromEntries(pairs.filter(([, v]) => v.length)))
+      if (caps && caps.length) { setChain(caps); setCheck(await verifyChain(caps)) }
+    })()
+  }, [id])
+
+  const flatCustody = Object.values(custody).flat()
+
+  // No multi-step journey → just the custody list (or nothing).
+  if (!chain || chain.length <= 1) {
+    if (flatCustody.length === 0) return null
+    return (
+      <div className="custody-timeline">
+        <h3 className="custody-timeline-h">🚚 {L('Chain of custody', 'ខ្សែសង្វាក់ចរាចរណ៍')}</h3>
+        {flatCustody.map((it) => <CustodyRow key={it.id} it={it} L={L} />)}
+      </div>
+    )
+  }
+
+  const ordered = [...chain].sort((a, b) => (a.event?.step ?? 0) - (b.event?.step ?? 0))
+  return (
+    <div className="trace-journey-pub">
+      <h3 className="custody-timeline-h">
+        🧭 {L('Full journey', 'ដំណើរពេញ')}
+        {check ? (
+          <span className={`custody-tag ${check.ok ? 'ok' : 'self'}`}>
+            {check.ok ? `✓ ${L('verified', 'បានផ្ទៀងផ្ទាត់')}` : `⚠ ${L('altered', 'បានកែ')}`}
+          </span>
+        ) : null}
+      </h3>
+      <ol className="journey-steps">
+        {ordered.map((cap, i) => (
+          <li key={cap.id} className={`journey-step ${cap.id === id ? 'here' : ''}`}>
+            <div className="journey-step-head">
+              <b>{i + 1}. {cap.event?.type ?? 'event'}</b>
+              {cap.context.producer ? <span> · {cap.context.producer}</span> : null}
+            </div>
+            <div className="journey-step-sub">
+              {cap.context.product ? `${cap.context.product} · ` : ''}
+              {cap.context.capturedAt ? new Date(cap.context.capturedAt).toLocaleDateString() : ''}
+              {cap.context.gps ? ` · 📍 ${cap.context.gps.lat}, ${cap.context.gps.lng}` : ''}
+            </div>
+            {(custody[cap.id] ?? []).map((it) => <CustodyRow key={it.id} it={it} L={L} />)}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * Walk the farm boundary, one corner at a time — the EUDR geolocation the EU
+ * asks of exporters, captured by a grower with nothing but a phone.
+ *
+ * Under 4 ha a single point is accepted; at 4 ha and above a polygon of the
+ * perimeter is required, so the control keeps showing the running area and warns
+ * as soon as a point-only plot crosses the threshold.
+ */
+function PlotWalker({
+  plot, onPlot, L,
+}: { plot: PlotGeometry | null; onPlot: (p: PlotGeometry | null) => void; L: LFn }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const points = plot?.points ?? []
+
+  function addCorner() {
+    setBusy(true); setErr('')
+    navigator.geolocation?.getCurrentPosition(
+      (pos) => {
+        const next = [...points, { lat: pos.coords.latitude, lng: pos.coords.longitude }]
+        onPlot(buildPlot(next, plot?.ref))
+        setBusy(false)
+      },
+      () => { setErr(L('Could not get location', 'មិនអាចទាញទីតាំង')); setBusy(false) },
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }
+
+  const needPolygon = eudrNeedsPolygon(plot?.areaHa ?? 0)
+  const isPolygon = points.length >= 3
+  return (
+    <>
+      <p className="voice-minor-note">
+        {L('Stand at each corner of the plot and tap "Add corner" as you walk around it. Under 4 ha one point is enough; 4 ha and above needs the full boundary.',
+           'ឈរនៅជ្រុងនីមួយៗនៃដី ហើយចុច «បន្ថែមជ្រុង» ពេលដើរជុំវិញ។ តិចជាង ៤ ហិកតា ត្រូវការតែចំណុចមួយ; ចាប់ពី ៤ ហិកតា ត្រូវការព្រំដែនពេញ។')}
+      </p>
+
+      <div className="trace-gps">
+        <button className="voice-ghost" onClick={addCorner} disabled={busy}>
+          📍 {busy ? '…' : L('Add corner', 'បន្ថែមជ្រុង')} {points.length ? `(${points.length})` : ''}
+        </button>
+        {points.length > 0 ? (
+          <button className="voice-ghost" onClick={() => onPlot(null)}>
+            ↺ {L('Clear', 'សម្អាត')}
+          </button>
+        ) : null}
+      </div>
+
+      {points.length > 0 ? (
+        <div className={`trace-plot ${needPolygon && !isPolygon ? 'warn' : 'ok'}`}>
+          <b>
+            {isPolygon
+              ? `${plot!.areaHa} ha · ${points.length} ${L('corners', 'ជ្រុង')}`
+              : `${points.length} ${L('point', 'ចំណុច')}`}
+          </b>
+          <div>
+            {needPolygon && !isPolygon
+              ? `⚠ ${L('4 ha or more needs the full boundary — keep walking the corners.', 'ចាប់ពី ៤ ហិកតា ត្រូវការព្រំដែនពេញ — សូមដើរបន្តជុំវិញ។')}`
+              : isPolygon
+                ? `✓ ${L('Boundary recorded (EUDR polygon)', 'បានកត់ត្រាព្រំដែន (EUDR polygon)')}`
+                : `✓ ${L('Point recorded — fine for a plot under 4 ha', 'បានកត់ត្រាចំណុច — គ្រប់គ្រាន់សម្រាប់ដីតិចជាង ៤ ហិកតា')}`}
+          </div>
+        </div>
+      ) : null}
+      {err ? <p className="voice-error">{err}</p> : null}
+    </>
   )
 }
 
