@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
 import { getLocation, type GeoPoint } from '../lib/geo'
 import {
@@ -21,12 +21,77 @@ import { anchorCall, plotLiveCount, readPlotStatus, type CsbPlotStatus } from '.
  * with your device key. Records are stored locally and exportable to any node /
  * dashboard / CamboVerse. See grove/SPEC.md. Estimates, not certified credits.
  */
-const SPECIES = ['mango', 'coconut', 'jackfruit', 'longan', 'guava', 'tamarind', 'teak', 'banana', 'other']
+interface SpeciesInfo {
+  id: string
+  en: string
+  km: string
+  scientific?: string
+}
+const SPECIES_LIST: SpeciesInfo[] = [
+  { id: 'mango', en: 'Mango', km: 'ស្វាយ', scientific: 'Mangifera indica' },
+  { id: 'coconut', en: 'Coconut', km: 'ដូង', scientific: 'Cocos nucifera' },
+  { id: 'jackfruit', en: 'Jackfruit', km: 'ខ្នុរ', scientific: 'Artocarpus heterophyllus' },
+  { id: 'longan', en: 'Longan', km: 'មៀន', scientific: 'Dimocarpus longan' },
+  { id: 'guava', en: 'Guava', km: 'ត្របែក', scientific: 'Psidium guajava' },
+  { id: 'tamarind', en: 'Tamarind', km: 'អំពិល', scientific: 'Tamarindus indica' },
+  { id: 'teak', en: 'Teak', km: 'ម៉ៃសាក់', scientific: 'Tectona grandis' },
+  { id: 'banana', en: 'Banana', km: 'ចេក', scientific: 'Musa spp.' },
+  { id: 'rambutan', en: 'Rambutan', km: 'សាវម៉ាវ', scientific: 'Nephelium lappaceum' },
+  { id: 'durian', en: 'Durian', km: 'ធូរេន', scientific: 'Durio zibethinus' },
+  { id: 'papaya', en: 'Papaya', km: 'ល្ហុង', scientific: 'Carica papaya' },
+  { id: 'pomelo', en: 'Pomelo', km: 'ក្រូចថ្លុង', scientific: 'Citrus maxima' },
+  { id: 'lime', en: 'Lime', km: 'ក្រូចឆ្មារ', scientific: 'Citrus aurantiifolia' },
+  { id: 'star-fruit', en: 'Star fruit', km: 'ស្ពឺ', scientific: 'Averrhoa carambola' },
+  { id: 'sugar-apple', en: 'Sugar apple', km: 'ទៀប', scientific: 'Annona squamosa' },
+  { id: 'soursop', en: 'Soursop', km: 'ទៀបបារាំង', scientific: 'Annona muricata' },
+  { id: 'sapodilla', en: 'Sapodilla', km: 'ល្មុត', scientific: 'Manilkara zapota' },
+  { id: 'mangosteen', en: 'Mangosteen', km: 'មង្ឃុត', scientific: 'Garcinia mangostana' },
+  { id: 'avocado', en: 'Avocado', km: 'ប័រ', scientific: 'Persea americana' },
+  { id: 'neem', en: 'Neem', km: 'ស្តៅ', scientific: 'Azadirachta indica' },
+  { id: 'banyan', en: 'Banyan', km: 'ជ្រៃ', scientific: 'Ficus benghalensis' },
+  { id: 'bodhi', en: 'Bodhi (Sacred fig)', km: 'ដើមពោធិ៍', scientific: 'Ficus religiosa' },
+  { id: 'sugar-palm', en: 'Sugar palm (Palmyra)', km: 'ត្នោត', scientific: 'Borassus flabellifer' },
+  { id: 'areca-palm', en: 'Areca palm (Betel)', km: 'ស្លា', scientific: 'Areca catechu' },
+  { id: 'rubber', en: 'Rubber tree', km: 'កៅស៊ូ', scientific: 'Hevea brasiliensis' },
+  { id: 'lychee', en: 'Lychee', km: 'គូឡែន', scientific: 'Litchi chinensis' },
+  { id: 'cashew', en: 'Cashew', km: 'ស្វាយចន្ទី', scientific: 'Anacardium occidentale' },
+  { id: 'white-champak', en: 'White Champak', km: 'ចំប៉ា', scientific: 'Michelia alba' },
+  { id: 'white-frangipani', en: 'White Frangipani', km: 'ចំប៉ីស', scientific: 'Plumeria alba' },
+  { id: 'red-frangipani', en: 'Red Frangipani', km: 'ចំប៉ីក្រហម', scientific: 'Plumeria rubra' },
+  { id: 'siamese-rosewood', en: 'Siamese rosewood', km: 'ក្រញូង', scientific: 'Dalbergia cochinchinensis' },
+  { id: 'pine', en: 'Pine (Sumatran pine)', km: 'ស្រល់', scientific: 'Pinus merkusii' },
+]
+/** These species remain selectable but use the conservative generic density estimate. */
+const GENERIC_DENSITY_SPECIES = new Set([
+  'white-champak', 'white-frangipani', 'red-frangipani', 'siamese-rosewood', 'pine',
+])
 /** Where the optional CSB read endpoint is remembered. Empty = chain off. */
 const CSB_KEY = 'grove.csb.base.v1'
-const SP_KM: Record<string, string> = {
-  mango: 'ស្វាយ', coconut: 'ដូង', jackfruit: 'ខ្នុរ', longan: 'មៀន', guava: 'ត្របែក',
-  tamarind: 'អំពិល', teak: 'ម៉ៃសាក់', banana: 'ចេក', other: 'ផ្សេង',
+function speciesLabel(idOrText: string, km: boolean): string {
+  const found = SPECIES_LIST.find((s) => s.id === idOrText)
+  if (!found) return idOrText
+  const name = km ? found.km : found.en
+  return found.scientific ? `${name} (${found.scientific})` : name
+}
+function speciesShortLabel(idOrText: string, km: boolean): string {
+  const found = SPECIES_LIST.find((s) => s.id === idOrText)
+  return found ? (km ? found.km : found.en) : idOrText
+}
+function matchSpecies(query: string): SpeciesInfo[] {
+  const q = query.trim()
+  if (!q) return SPECIES_LIST
+  const qLower = q.toLowerCase()
+  return SPECIES_LIST
+    .map((s) => {
+      const enLower = s.en.toLowerCase()
+      const scientific = (s.scientific ?? '').toLowerCase()
+      const score = enLower.startsWith(qLower) || s.km.startsWith(q) ? 2 :
+        enLower.includes(qLower) || s.km.includes(q) || scientific.includes(qLower) ? 1 : 0
+      return { s, score }
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.s)
 }
 
 export function GardenView() {
@@ -35,11 +100,16 @@ export function GardenView() {
   const [obs, setObs] = useState<GardenObservation[]>(() => loadObservations())
   const [plot, setPlot] = useState(() => loadPlots()[0] ?? 'home-garden-01')
   const [species, setSpecies] = useState('mango')
+  const [speciesQuery, setSpeciesQuery] = useState(() => speciesLabel('mango', km))
+  const [speciesOpen, setSpeciesOpen] = useState(false)
+  const [speciesHighlight, setSpeciesHighlight] = useState(0)
+  const speciesListboxId = useId()
   const [count, setCount] = useState(1)
   const [dbh, setDbh] = useState('')
   const [height, setHeight] = useState('')
   const [gps, setGps] = useState<GeoPoint | null>(null)
   const [locating, setLocating] = useState(false)
+  const [locationMessage, setLocationMessage] = useState('')
   const [image, setImage] = useState<Blob | null>(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [saving, setSaving] = useState(false)
@@ -111,6 +181,34 @@ export function GardenView() {
     return { method: 'manual', biomassKg: 0 }
   }, [dbh, height])
 
+  useEffect(() => {
+    if (SPECIES_LIST.some((item) => item.id === species)) setSpeciesQuery(speciesLabel(species, km))
+  }, [km, species])
+
+  const speciesMatches = useMemo(
+    () => matchSpecies(speciesQuery === speciesLabel(species, km) ? '' : speciesQuery),
+    [speciesQuery, species, km],
+  )
+
+  function selectSpecies(id: string) {
+    setSpecies(id)
+    setSpeciesQuery(speciesLabel(id, km))
+    setSpeciesOpen(false)
+  }
+
+  function commitSpeciesQuery() {
+    const query = speciesQuery.trim()
+    if (!query) { setSpeciesQuery(speciesLabel(species, km)); return }
+    if (query === speciesLabel(species, km) || query === speciesLabel(species, !km)) return
+    const queryLower = query.toLowerCase()
+    const exact = SPECIES_LIST.find((item) =>
+      item.en.toLowerCase() === queryLower || item.km === query ||
+      speciesLabel(item.id, true) === query || speciesLabel(item.id, false).toLowerCase() === queryLower,
+    )
+    if (exact) selectSpecies(exact.id)
+    else setSpecies(query)
+  }
+
   const est = useMemo(() => {
     const per = estimateCarbon(measure, species)
     return { per: per.co2Kg, total: Math.round(per.co2Kg * Math.max(1, count) * 100) / 100 }
@@ -128,7 +226,14 @@ export function GardenView() {
 
   async function addLocation() {
     setLocating(true)
-    setGps(await getLocation())
+    setLocationMessage('')
+    const point = await getLocation()
+    setGps(point)
+    setLocationMessage(
+      point
+        ? (km ? `✓ ទីតាំងបានកត់ត្រា · ភាពត្រឹមត្រូវប្រហែល ${point.acc} ម` : `✓ Location recorded · accurate to about ${point.acc} m`)
+        : (km ? 'មិនអាចទទួលទីតាំងបានទេ — អនុញ្ញាត Location ហើយព្យាយាមម្ដងទៀត' : 'Could not get location — allow Location, then try again'),
+    )
     setLocating(false)
   }
 
@@ -208,34 +313,97 @@ export function GardenView() {
         <>
           <img className="ocr-preview" src={previewUrl} alt="" />
 
-          <label className="voice-field">
+          <label className="voice-field species-combo">
             <span>{km ? 'ប្រភេទ' : 'Species'}</span>
-            <div className="crop-chips">
-              {SPECIES.map((s) => (
-                <button key={s} type="button" className={species === s ? 'active' : ''} onClick={() => setSpecies(s)}>
-                  {km ? SP_KM[s] : s}
-                </button>
-              ))}
-            </div>
+            <input
+              type="text"
+              value={speciesQuery}
+              maxLength={60}
+              spellCheck={false}
+              placeholder={km ? 'ស្វែងរក ឬវាយបញ្ចូលប្រភេទ…' : 'Search or type a species…'}
+              onFocus={() => setSpeciesOpen(true)}
+              onChange={(e) => { setSpeciesQuery(e.target.value); setSpeciesOpen(true); setSpeciesHighlight(0) }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault(); setSpeciesOpen(true)
+                  setSpeciesHighlight((index) => Math.min(index + 1, speciesMatches.length - 1))
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault(); setSpeciesHighlight((index) => Math.max(index - 1, 0))
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (speciesOpen && speciesMatches[speciesHighlight]) selectSpecies(speciesMatches[speciesHighlight].id)
+                  else commitSpeciesQuery()
+                  setSpeciesOpen(false)
+                } else if (e.key === 'Escape') setSpeciesOpen(false)
+              }}
+              onBlur={() => { commitSpeciesQuery(); setSpeciesOpen(false) }}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={speciesOpen}
+              aria-controls={speciesListboxId}
+              aria-activedescendant={speciesOpen && speciesMatches[speciesHighlight] ? `${speciesListboxId}-${speciesMatches[speciesHighlight].id}` : undefined}
+            />
+            {speciesOpen ? (
+              <div id={speciesListboxId} className="species-combo-panel" role="listbox">
+                {speciesMatches.map((item, index) => (
+                  <button
+                    id={`${speciesListboxId}-${item.id}`}
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={species === item.id}
+                    className={index === speciesHighlight ? 'active' : ''}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setSpeciesHighlight(index)}
+                    onClick={() => selectSpecies(item.id)}
+                  >
+                    <span>{km ? item.km : item.en}</span>
+                    {item.scientific || GENERIC_DENSITY_SPECIES.has(item.id) ? (
+                      <small>
+                        {item.scientific ? `(${item.scientific})` : ''}
+                        {GENERIC_DENSITY_SPECIES.has(item.id) ? (km ? ' · ប៉ាន់ស្មានទូទៅ' : ' · general estimate') : ''}
+                      </small>
+                    ) : null}
+                  </button>
+                ))}
+                {speciesMatches.length === 0 && speciesQuery.trim() ? (
+                  <div className="species-combo-empty">
+                    {km ? `ប្រើ “${speciesQuery.trim()}” ជាប្រភេទផ្ទាល់ខ្លួន` : `Use “${speciesQuery.trim()}” as a custom species`}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </label>
 
-          <div className="garden-measure">
-            <label className="voice-field">
-              <span>{km ? 'អង្កត់ផ្ចិតដើម (សម) នៅ ១.៣ម' : 'Trunk width (cm) at 1.3 m'}</span>
+          <section className="garden-form-section" aria-labelledby="garden-measure-title">
+            <div className="garden-form-heading">
+              <div>
+                <h2 id="garden-measure-title">{km ? 'វាស់ដើមឈើ' : 'Measure the tree'}</h2>
+                <p>{km ? 'បញ្ចូលអង្កត់ផ្ចិត ឬកម្ពស់យ៉ាងហោចណាស់មួយ' : 'Enter trunk width or height — one measurement is enough.'}</p>
+              </div>
+              <span className="garden-required">{km ? 'ត្រូវការ' : 'Required'}</span>
+            </div>
+            <div className="garden-measure">
+            <label className="voice-field garden-input-card">
+              <span>{km ? 'អង្កត់ផ្ចិតដើម' : 'Trunk width'}</span>
+              <small>{km ? 'សង់ទីម៉ែត្រ · វាស់នៅកម្ពស់ ១.៣ ម' : 'centimetres · measure at 1.3 m high'}</small>
               <input type="number" inputMode="decimal" min="0" value={dbh} placeholder="e.g. 20"
                 onChange={(e) => setDbh(e.target.value)} />
             </label>
-            <label className="voice-field">
-              <span>{km ? 'កម្ពស់ (ម)' : 'Height (m)'}</span>
+            <label className="voice-field garden-input-card">
+              <span>{km ? 'កម្ពស់ដើមឈើ' : 'Tree height'}</span>
+              <small>{km ? 'ម៉ែត្រ · ប៉ាន់ស្មានបាន' : 'metres · an estimate is fine'}</small>
               <input type="number" inputMode="decimal" min="0" value={height} placeholder="e.g. 8"
                 onChange={(e) => setHeight(e.target.value)} />
             </label>
-            <label className="voice-field">
+            <label className="voice-field garden-input-card garden-count-field">
               <span>{km ? 'ចំនួន' : 'Count'}</span>
+              <small>{km ? 'ដើមដូចគ្នា' : 'matching plants'}</small>
               <input type="number" inputMode="numeric" min="1" value={count}
                 onChange={(e) => setCount(Math.max(1, parseInt(e.target.value) || 1))} />
             </label>
-          </div>
+            </div>
+          </section>
 
           <div className="garden-est">
             ≈ <b>{est.total}</b> kg CO₂ {count > 1 ? <small>({est.per} × {count})</small> : null}
@@ -246,9 +414,17 @@ export function GardenView() {
             <input type="text" value={plot} maxLength={40} onChange={(e) => setPlot(e.target.value)} />
           </label>
 
-          <button className="voice-ghost small" onClick={addLocation} disabled={locating}>
-            📍 {gps ? (km ? 'ទីតាំងបានបន្ថែម' : 'Location added') : locating ? (km ? 'កំពុងរក…' : 'Getting…') : (km ? 'បន្ថែមទីតាំង' : 'Add location')}
-          </button>
+          <section className="garden-location" aria-live="polite">
+            <div>
+              <h2>{km ? 'ទីតាំងដើមឈើ' : 'Tree location'}</h2>
+              <p>{km ? 'ស្រេចចិត្ត · នៅលើឧបករណ៍នេះ រហូតដល់អ្នកផ្សព្វផ្សាយកំណត់ត្រា' : 'Optional · stays on this device until you publish the record'}</p>
+            </div>
+            <button className={gps ? 'garden-location-button recorded' : 'garden-location-button'} onClick={addLocation} disabled={locating}>
+              <span aria-hidden="true">{locating ? '◌' : gps ? '✓' : '📍'}</span>
+              <span>{locating ? (km ? 'កំពុងរកទីតាំង…' : 'Finding location…') : gps ? (km ? 'ទីតាំងបានកត់ត្រា' : 'Location recorded') : (km ? 'កត់ត្រាទីតាំងនេះ' : 'Record this location')}</span>
+            </button>
+            {locationMessage ? <p className={gps ? 'garden-location-status success' : 'garden-location-status'}>{locationMessage}</p> : null}
+          </section>
 
           {error ? <p className="voice-error">{error}</p> : null}
           <div className="voice-controls">
@@ -274,7 +450,7 @@ export function GardenView() {
           {publishMsg ? <p className="garden-publish-msg">{publishMsg}</p> : null}
           {[...obs].reverse().slice(0, 30).map((o) => (
             <div key={o.id} className="garden-row">
-              <span className="garden-row-sp">{km ? SP_KM[o.species] ?? o.species : o.species}{o.count > 1 ? ` ×${o.count}` : ''}</span>
+              <span className="garden-row-sp">{speciesShortLabel(o.species, km)}{o.count > 1 ? ` ×${o.count}` : ''}</span>
               <span className="garden-row-co2">{o.co2Kg} kg CO₂</span>
               <span className="garden-row-id" title={o.id}>
                 {published.has(o.id) ? '🌐' : '✅'} {o.id.slice(0, 8)}
