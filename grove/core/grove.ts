@@ -123,6 +123,7 @@ export const DEFAULT_WOOD_DENSITY = 0.6
  * Common Cambodian garden species (g/cm³, approximate basic specific gravity —
  * average published values per species, not a per-tree measurement). Extend freely;
  * keys must match the species ids in src/views/GardenView.tsx's SPECIES_LIST.
+ * Species without a listed value use the conservative default.
  */
 export const WOOD_DENSITY: Record<string, number> = {
   mango: 0.52,
