@@ -1,0 +1,57 @@
+name: Deploy to Cloudflare Workers
+
+# Builds and deploys iAny (static PWA + edge worker) on every push to main.
+#
+# One-time setup (all doable from a phone browser):
+#   1. dash.cloudflare.com -> My Profile -> API Tokens -> Create Token
+#      (use the "Edit Cloudflare Workers" template, or grant Workers Scripts,
+#      Workers R2 Storage, Workers KV Storage and D1 edit permissions).
+#   2. dash.cloudflare.com -> pick your account -> copy the Account ID from
+#      the right-hand sidebar of any Workers page.
+#   3. github.com -> this repo -> Settings -> Secrets and variables -> Actions
+#      -> New repository secret:
+#        - CLOUDFLARE_API_TOKEN
+#        - CLOUDFLARE_ACCOUNT_ID
+#   4. Before the first deploy, create the R2 bucket and D1 database once
+#      (see comments in wrangler.jsonc) — either from the Cloudflare
+#      dashboard or `npx wrangler r2 bucket create iany-models` /
+#      `npx wrangler d1 execute iany-radio --remote --file worker/schema.sql`
+#      from a machine with `wrangler login` run once.
+#
+# After that, every push to main deploys automatically. You can also trigger
+# a deploy manually from the Actions tab ("Run workflow").
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
