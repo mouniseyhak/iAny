@@ -188,14 +188,35 @@ export function shouldConsultRemote(state: DecisionState, local: readonly Scored
 }
 
 /**
+ * Why the last ranking came from where it did.
+ *
+ * "It answered on-device" is not diagnostic on its own — a confident local
+ * answer and a broken deployment look identical to the user. Naming the cause
+ * is what makes a missing binding or an unreachable worker visible instead of
+ * silently indistinguishable from working correctly.
+ */
+export type ScoreReason =
+  | 'used'            // the remote answer was taken
+  | 'not-needed'      // local was confident and unambiguous; no call made
+  | 'single-option'   // nothing to choose between
+  | 'unreachable'     // offline, DNS, CORS — the request never completed
+  | 'server-error'    // the endpoint answered, but not with 2xx
+  | 'low-confidence'  // the model answered below the floor, so it was discarded
+
+/**
  * Remote scorer with an unconditional local fallback.
  *
  * Falls back on: offline, HTTP error, empty candidate set, or a confidence
- * below the floor. The caller cannot end up with no answer.
+ * below the floor. The caller cannot end up with no answer — and `lastReason`
+ * says which of those happened.
  */
 export class JevScorer implements Scorer {
   /** Which scorer actually produced the last result, for the UI to show. */
   lastSource: 'local' | 'remote' = 'local'
+  /** Why — see `ScoreReason`. Surfaced in the UI so failures aren't silent. */
+  lastReason: ScoreReason = 'not-needed'
+  /** HTTP status when `lastReason` is 'server-error', else 0. */
+  lastStatus = 0
 
   constructor(
     private endpoint = '/api/decide',
@@ -205,28 +226,45 @@ export class JevScorer implements Scorer {
   async rank(state: DecisionState): Promise<Scored[]> {
     const local = rankLocal(state)
     this.lastSource = 'local'
-    if (state.candidates.length === 0 || !this.fetchImpl) return local
+    this.lastStatus = 0
+    if (state.candidates.length === 0 || !this.fetchImpl) {
+      this.lastReason = 'single-option'
+      return local
+    }
     // Spend a call only when the cheap scorer is genuinely unsure — either it
     // lacks the history to stand on, or its top two are a coin toss. A user
     // with deep history and a clear winner gets an instant offline answer and
     // costs nothing.
-    if (!shouldConsultRemote(state, local)) return local
+    if (!shouldConsultRemote(state, local)) {
+      this.lastReason =
+        state.candidates.filter((c) => c.available).length < 2 ? 'single-option' : 'not-needed'
+      return local
+    }
     try {
       const res = await this.fetchImpl(this.endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ key: stateKey(state), request: buildRequest(state) }),
       })
-      if (!res.ok) return local
+      if (!res.ok) {
+        this.lastReason = 'server-error'
+        this.lastStatus = res.status
+        return local
+      }
       const remote = readRanking(state, (await res.json()) as JevResponse)
       const top = remote[0]
-      if (!top || top.confidence < MIN_CONFIDENCE) return local
+      if (!top || top.confidence < MIN_CONFIDENCE) {
+        this.lastReason = 'low-confidence'
+        return local
+      }
       // Keep the local reasons alongside the remote score: the user still gets
       // a breakdown they can argue with, whichever scorer produced the number.
       const byKey = new Map(local.map((s) => [s.key, s.reasons]))
       this.lastSource = 'remote'
+      this.lastReason = 'used'
       return remote.map((s) => ({ ...s, reasons: [...(byKey.get(s.key) ?? []), ...s.reasons] }))
     } catch {
+      this.lastReason = 'unreachable'
       return local
     }
   }

@@ -294,24 +294,39 @@ const offlineScorer = new JevScorer('/api/decide', (async () => {
 const offlineRanked = await offlineScorer.rank(thin)
 ok('network failure still returns a ranking', offlineRanked.length === 2)
 ok('network failure reports local provenance', offlineScorer.lastSource === 'local')
+ok('network failure names the cause', offlineScorer.lastReason === 'unreachable')
 
 const badStatus = new JevScorer('/api/decide', (async () =>
   new Response('nope', { status: 503 })) as unknown as typeof fetch)
 ok('server error falls back to local', (await badStatus.rank(thin)).length === 2)
+ok('server error names the cause', badStatus.lastReason === 'server-error')
+ok('server error keeps the status code', badStatus.lastStatus === 503)
 
 const lowConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
   answers: { pick: { type: 'choice', confidence: 0.1, probabilities: { a: 0.5, b: 0.5 } } },
 }))) as unknown as typeof fetch)
 await lowConf.rank(thin)
 ok('an under-confident remote answer is discarded', lowConf.lastSource === 'local')
+ok('a discarded answer names the cause', lowConf.lastReason === 'low-confidence')
 
 const goodConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
   answers: { pick: { type: 'choice', confidence: 0.85, probabilities: { a: 0.7, b: 0.3 } } },
 }))) as unknown as typeof fetch)
 const remoteRanked = await goodConf.rank(thin)
 ok('a confident remote answer is used', goodConf.lastSource === 'remote')
+ok('a used answer says so', goodConf.lastReason === 'used')
 ok('remote answers keep the local reasons for the breakdown',
    remoteRanked[0]!.key === 'a' && remoteRanked[0]!.score === 0.7)
+
+// A confident local answer must be distinguishable from a broken deployment.
+const skipper = new JevScorer('/api/decide', (async () => {
+  throw new Error('should not be called')
+}) as unknown as typeof fetch)
+await skipper.rank(deep)
+ok('a skipped call says it was not needed', skipper.lastReason === 'not-needed')
+const solo = state({ historyCount: 0, candidates: [cand('a', ['rice'])] })
+await skipper.rank(solo)
+ok('one option says so, not "unreachable"', skipper.lastReason === 'single-option')
 
 console.log(`\n${fails.length ? '❌' : '✅'} ${pass} passed, ${fails.length} failed`)
 if (fails.length) throw new Error(fails.join('; '))

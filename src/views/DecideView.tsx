@@ -23,7 +23,7 @@ import {
   seedItem,
   setAvailable,
 } from '../decide/habit'
-import { JevScorer } from '../decide/jev'
+import { type ScoreReason, JevScorer } from '../decide/jev'
 
 /**
  * Decide (/decide) — "what should I eat today?" / "what should I wear today?"
@@ -73,6 +73,16 @@ const TAG_TEXT: Partial<Record<Tag, { km: string; en: string }>> = {
   casual: { km: 'ធម្មតា', en: 'casual' },
 }
 
+/** Where the answer came from, and why — so a broken binding is visible. */
+const SOURCES: Record<ScoreReason, { km: string; en: string }> = {
+  used: { km: 'ពិគ្រោះនឹង Jev លើបណ្តាញ', en: 'checked online with Jev' },
+  'not-needed': { km: 'លើឧបករណ៍ · ច្បាស់ណាស់ មិនចាំបាច់សួរ', en: 'on-device · confident, no call needed' },
+  'single-option': { km: 'លើឧបករណ៍ · មានជម្រើសតែមួយ', en: 'on-device · only one option' },
+  unreachable: { km: 'លើឧបករណ៍ · ទៅមិនដល់ម៉ាស៊ីនមេ', en: 'on-device · server unreachable' },
+  'server-error': { km: 'លើឧបករណ៍ · ម៉ាស៊ីនមេមានបញ្ហា', en: 'on-device · server error' },
+  'low-confidence': { km: 'លើឧបករណ៍ · ចម្លើយបណ្តាញមិនច្បាស់', en: 'on-device · online answer unclear' },
+}
+
 const FREQUENCIES: { value: SeedFrequency; km: string; en: string }[] = [
   { value: 'daily', km: 'ស្ទើរតែរាល់ថ្ងៃ', en: 'most days' },
   { value: 'weekly', km: 'ប្រចាំសប្តាហ៍', en: 'most weeks' },
@@ -90,7 +100,8 @@ export function DecideView() {
   const [entries, setEntries] = useState(0)
   const [results, setResults] = useState<Scored[] | null>(null)
   const [labels, setLabels] = useState<Map<string, string>>(new Map())
-  const [source, setSource] = useState<'local' | 'remote'>('local')
+  const [reason, setReason] = useState<ScoreReason>('not-needed')
+  const [status, setStatus] = useState(0)
   const [confidence, setConfidence] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -145,7 +156,8 @@ export function DecideView() {
       const scorer = new JevScorer()
       const ranked = await scorer.rank(state)
       setResults(ranked)
-      setSource(scorer.lastSource)
+      setReason(scorer.lastReason)
+      setStatus(scorer.lastStatus)
       setConfidence(ranked[0]?.confidence ?? 0)
       setLabels(await labelsFor(ranked.map((r) => r.key)))
     } catch (err) {
@@ -271,10 +283,8 @@ export function DecideView() {
 
               <p className="decide-meta">
                 {km ? 'ទំនុកចិត្ត' : 'Confidence'} {Math.round(confidence * 100)}% ·{' '}
-                {source === 'remote'
-                  ? (km ? 'ពិគ្រោះលើបណ្តាញ' : 'checked online')
-                  : (km ? 'គណនាក្នុងឧបករណ៍' : 'answered on-device')}{' '}
-                · {entries} {km ? 'កំណត់ត្រា' : 'entries'}
+                {km ? SOURCES[reason].km : SOURCES[reason].en}
+                {status ? ` (${status})` : ''} · {entries} {km ? 'កំណត់ត្រា' : 'entries'}
               </p>
               {confidence < 0.6 && (
                 <p className="decide-hint">
