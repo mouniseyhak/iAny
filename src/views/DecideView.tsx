@@ -25,21 +25,30 @@ import {
   seedItem,
   setAvailable,
 } from '../decide/habit'
-import { type ScoreReason, JevScorer } from '../decide/jev'
+import { type ScoreReason, JevScorer, remoteGate } from '../decide/jev'
 import { localConfidence } from '../decide/suggest'
 
 /**
- * How decisive the remote pick was, as lift over chance.
- *
- * Shown instead of the raw confidence because they answer different questions.
- * A 36% confidence over five close options is NOT "the app is unsure" — it is
- * "these are all reasonable", which is a useful answer, not a weak one.
+ * The detail line's words come from the SAME gate that accepted or rejected
+ * the answer (`remoteGate`), never from a separate rule. A separate lift-only
+ * rule once printed "clear winner" directly under a status line that had just
+ * rejected the very same answer.
  */
-function decisiveness(top: number, options: number): { km: string; en: string } {
-  const lift = top * options
+function remoteWords(r: { confidence: number; top: number; options: number }): { km: string; en: string } {
+  const gate = remoteGate(r.confidence, r.top, r.options)
+  if (gate.verdict === 'self-doubt') {
+    return { km: 'Jev មិនប្រាកដក្នុងចិត្ត — មិនប្រើ', en: `unsure of itself (conf ${r.confidence.toFixed(2)} < ${gate.confFloor}) — not used` }
+  }
+  if (gate.verdict === 'flat') {
+    return { km: 'ជម្រើសស្មើៗគ្នា — មិនប្រើ', en: `spread too flat (lift ${gate.lift.toFixed(2)}) — not used` }
+  }
+  if (gate.verdict === 'solo') {
+    return { km: 'ជម្រើសតែមួយ', en: 'only one option' }
+  }
+  const lift = gate.lift
   if (lift >= 2.5) return { km: 'ជម្រើសច្បាស់លាស់', en: 'clear winner' }
   if (lift >= 1.8) return { km: 'ល្អជាងគេបន្តិច', en: 'mild preference' }
-  return { km: 'ប្រហាក់ប្រហែលគ្នា', en: 'close call — any of the top few work' }
+  return { km: 'ប្រហាក់ប្រហែលគ្នា — យកតាមទម្លាប់ក៏បាន', en: 'close call — any of the top few work' }
 }
 
 /**
@@ -431,11 +440,9 @@ export function DecideView() {
               {detail && <p className="decide-error">{detail}</p>}
               {remote && (
                 <p className="decide-meta">
-                  Jev · {km
-                    ? decisiveness(remote.top, remote.options).km
-                    : decisiveness(remote.top, remote.options).en}{' '}
-                  · {remote.options} {km ? 'ជម្រើស' : 'options'} · top {remote.top.toFixed(2)} ·
-                  lift {(remote.top * remote.options).toFixed(2)}
+                  Jev · {km ? remoteWords(remote).km : remoteWords(remote).en} ·{' '}
+                  {remote.options} {km ? 'ជម្រើស' : 'options'} · top {remote.top.toFixed(2)} ·
+                  conf {remote.confidence.toFixed(2)}
                 </p>
               )}
 

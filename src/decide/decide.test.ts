@@ -23,7 +23,7 @@ import {
 } from './state'
 import { isAmbiguous, localConfidence, rankLocal, scoreCandidate } from './suggest'
 import { cosineDistance, normalize, updateCentroid, verdictFor } from './match'
-import { JevScorer, buildQuestions, describeShape, describeState, normalizeJevResponse, readRanking, remoteIsInformative, shouldConsultRemote } from './jev'
+import { JevScorer, buildQuestions, describeShape, describeState, normalizeJevResponse, readRanking, remoteGate, remoteIsInformative, shouldConsultRemote } from './jev'
 
 let pass = 0; const fails: string[] = []
 const ok = (n: string, c: boolean) => { c ? (pass++, console.log('  ✓', n)) : (fails.push(n), console.log('  ✗', n)) }
@@ -455,6 +455,17 @@ ok('2 options, 0.75 clears it', remoteIsInformative(0.9, 0.75, 2))
 ok('10 options, 0.18 is informative (1.8x chance)', remoteIsInformative(0.5, 0.18, 10))
 ok('near-random confidence is rejected whatever the lift',
    !remoteIsInformative(0.2, 0.9, 5))
+// The screenshot case that exposed the flat floor: 10 options, top 0.29,
+// confidence 0.29. Lift 2.9 is a clear winner; a flat 0.35 floor rejected it
+// while the detail line said "clear winner". The floor is now 1.2/n.
+ok('the 10-option screenshot case is now accepted', remoteIsInformative(0.29, 0.29, 10))
+ok('self-trust floor scales with options',
+   remoteGate(0.29, 0.29, 10).confFloor === 0.12 && remoteGate(0.5, 0.4, 2).confFloor === 0.6)
+ok('gate names which check failed',
+   remoteGate(0.05, 0.29, 10).verdict === 'self-doubt' &&
+   remoteGate(0.5, 0.11, 10).verdict === 'flat' &&
+   remoteGate(0.9, 1, 1).verdict === 'solo' &&
+   remoteGate(0.29, 0.29, 10).verdict === 'ok')
 ok('one option is never informative', !remoteIsInformative(0.99, 1, 1))
 ok('the old flat floor would have rejected a good 5-way answer',
    remoteIsInformative(0.45, 0.42, 5) && 0.45 < 0.6)

@@ -265,12 +265,6 @@ export function readRanking(state: DecisionState, resp: JevResponse): Scored[] {
  * asking keeps the answer instant and free.
  */
 /**
- * Absolute floor. Below this the model is telling us its answer is close to
- * random, and no amount of normalising makes that useful.
- */
-export const REMOTE_MIN_CONFIDENCE = 0.35
-
-/**
  * How far above chance the top option must sit. 1.0 is exactly uniform (no
  * information); 1.4 means the winner carries 40% more mass than if the model
  * had shrugged.
@@ -278,28 +272,43 @@ export const REMOTE_MIN_CONFIDENCE = 0.35
 export const MIN_LIFT = 1.4
 
 /**
- * Is the remote answer actually informative?
- *
- * The first version compared the model's scalar confidence to a flat 0.6, which
- * is wrong for a choice question: confidence tracks how PEAKED the distribution
- * is, and a peak gets harder to reach as options multiply. Demanding 0.6 across
- * five near-equivalent dishes demanded near-certainty about something genuinely
- * close — so a correctly-calibrated "these are similar" was thrown away as a
- * failure. Jev's whole claim is calibration; punishing it for being honest
- * defeats the point of using it.
- *
- * So the test is lift over uniform — did the model discriminate more than
- * chance? — with a low absolute floor to reject noise.
+ * The model's self-assessment must also beat chance, by this multiple. Like
+ * the lift, it is measured AGAINST 1/n, never against a flat number: an
+ * earlier flat 0.35 floor silently rejected every answer over ten options,
+ * however sharp, because confidence tracks the top probability and 10-way
+ * answers physically top out around 0.3. Same cardinality mistake as the
+ * original 0.6 gate, one constant lower — this is the version that can't
+ * repeat it.
  */
+export const MIN_SELF_TRUST = 1.2
+
+/** Which gate a remote answer failed, if any. One source of truth: the accept
+ *  decision AND the words on screen both come from here, so the status line
+ *  can never call an answer "unclear" while the detail line says "clear
+ *  winner" — the contradiction that motivated this shape. */
+export type GateVerdict = 'ok' | 'solo' | 'self-doubt' | 'flat'
+
+export function remoteGate(
+  confidence: number,
+  topProbability: number,
+  optionCount: number,
+): { verdict: GateVerdict; lift: number; confFloor: number } {
+  const uniform = optionCount > 0 ? 1 / optionCount : 1
+  const lift = topProbability / uniform
+  const confFloor = Math.round(MIN_SELF_TRUST * uniform * 1000) / 1000
+  if (optionCount < 2) return { verdict: 'solo', lift, confFloor }
+  if (confidence < confFloor) return { verdict: 'self-doubt', lift, confFloor }
+  if (lift < MIN_LIFT) return { verdict: 'flat', lift, confFloor }
+  return { verdict: 'ok', lift, confFloor }
+}
+
+/** Is the remote answer actually informative? See `remoteGate`. */
 export function remoteIsInformative(
   confidence: number,
   topProbability: number,
   optionCount: number,
 ): boolean {
-  if (optionCount < 2) return false
-  if (confidence < REMOTE_MIN_CONFIDENCE) return false
-  const uniform = 1 / optionCount
-  return topProbability / uniform >= MIN_LIFT
+  return remoteGate(confidence, topProbability, optionCount).verdict === 'ok'
 }
 
 export function shouldConsultRemote(state: DecisionState, local: readonly Scored[]): boolean {
