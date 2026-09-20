@@ -199,6 +199,8 @@ export function LandingView() {
             desc={L('Cast spells with hand gestures on the live camera — each gesture triggers a different effect. A playful demo of gesture → command, on-device.', 'បង្កើតវេទមន្តដោយកាយវិការដៃលើកាមេរ៉ា — កាយវិការនីមួយៗបង្កើតបែបផែនផ្សេងៗ។ ការបង្ហាញ កាយវិការ → បញ្ជា លើឧបករណ៍។')} link="/magic" linkLabel={L('Try /magic', 'សាកល្បង /magic')} />
           <Feature icon="🌳" title={L('Garden carbon', 'កាបូនសួន')} badge={L('Experiment', 'ពិសោធន៍')}
             desc={L('Log your garden trees + estimate their CO₂, signed on your device — an open, decentralized record anyone can verify. Estimates, not credits.', 'កត់ត្រាដើមឈើក្នុងសួន + ប៉ាន់ស្មាន CO₂ ចុះហត្ថលេខាលើឧបករណ៍ — កំណត់ត្រាបើកចំហ ដែលនរណាក៏ផ្ទៀងផ្ទាត់បាន។ ការប៉ាន់ស្មាន មិនមែនក្រេឌីត។')} link="/garden" linkLabel={L('Try /garden', 'សាកល្បង /garden')} />
+          <Feature icon="🤔" title={L('Decide', 'សម្រេចចិត្ត')} badge={L('Experiment', 'ពិសោធន៍')}
+            desc={L('What should I eat or wear today? Scores your own everyday choices from your habit list — on-device and offline, and it always shows the reasons behind the score.', 'ថ្ងៃនេះគួរញ៉ាំ ឬស្លៀកអ្វី? ដាក់ពិន្ទុជម្រើសប្រចាំថ្ងៃរបស់អ្នក ពីបញ្ជីទម្លាប់ផ្ទាល់ខ្លួន — លើឧបករណ៍ ក្រៅបណ្ដាញ ហើយតែងបង្ហាញមូលហេតុនៃពិន្ទុ។')} link="/decide" linkLabel={L('Try /decide', 'សាកល្បង /decide')} />
         </div>
       </section>
 
@@ -293,6 +295,7 @@ export function LandingView() {
           <a href="/crop-scan">/crop-scan</a>
           <a href="/magic">/magic</a>
           <a href="/garden">/garden</a>
+          <a href="/decide">/decide</a>
           <a href="/braille">/braille</a>
           <a href="/trace">/trace · {L('experiment', 'ពិសោធន៍')}</a>
         </div>
