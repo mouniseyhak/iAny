@@ -387,6 +387,17 @@ ok('high variety signal is cited',
    remote[0]!.reasons.some((r) => r.code === 'tag-fatigue'))
 ok('missing answers degrade to 0, not NaN',
    readRanking(remoteState, { answers: {} }).every((r) => r.score === 0 && !Number.isNaN(r.score)))
+// A confident choice with no probability map must not be misread as "unclear".
+const choiceOnly = readRanking(remoteState, {
+  answers: { pick: { type: 'choice', choice: 'opt_1', confidence: 0.82 } },
+})
+ok('a bare confident choice still ranks', choiceOnly[0]!.score === 0.82)
+ok('a bare choice clears the lift gate',
+   remoteIsInformative(0.82, choiceOnly[0]!.score, 2))
+ok('an unmapped choice stays at zero',
+   readRanking(remoteState, {
+     answers: { pick: { type: 'choice', choice: 'opt_99', confidence: 0.9 } },
+   }).every((r) => r.score === 0))
 
 console.log('\ncache key is shareable between people')
 // Two devices, same situation, different local ids. Before this fix the ids

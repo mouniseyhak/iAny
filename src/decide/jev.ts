@@ -231,6 +231,15 @@ export function readRanking(state: DecisionState, resp: JevResponse): Scored[] {
     if (key) probs[key] = p
   }
 
+  // A response can carry a confident `choice` with no usable probability map
+  // (absent, or keys that don't survive the alias mapping). Scoring that as
+  // all-zeros would misreport a confident answer as "unclear", so the choice
+  // itself becomes the distribution: its confidence as the top mass.
+  if (Object.keys(probs).length === 0 && pick?.choice) {
+    const chosen = toKey.get(pick.choice)
+    if (chosen) probs[chosen] = confidence > 0 ? confidence : 0.5
+  }
+
   const aux: Reason[] = []
   const variety = resp.answers?.['needs_variety']?.noul
   if (typeof variety === 'number' && variety > 0.6) {

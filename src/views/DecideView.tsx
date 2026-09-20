@@ -217,7 +217,9 @@ const SOURCES: Record<ScoreReason, { km: string; en: string }> = {
   'single-option': { km: 'លើឧបករណ៍ · មានជម្រើសតែមួយ', en: 'on-device · only one option' },
   unreachable: { km: 'លើឧបករណ៍ · ទៅមិនដល់ម៉ាស៊ីនមេ', en: 'on-device · server unreachable' },
   'server-error': { km: 'លើឧបករណ៍ · ម៉ាស៊ីនមេមានបញ្ហា', en: 'on-device · server error' },
-  'low-confidence': { km: 'លើឧបករណ៍ · ចម្លើយបណ្តាញមិនច្បាស់', en: 'on-device · online answer unclear' },
+  // Not a failure: Jev answered, but its spread didn't beat chance, which IS
+  // an answer — "these are equivalent, your own habits decide".
+  'low-confidence': { km: 'លើឧបករណ៍ · Jev ថាជម្រើសប្រហាក់ប្រហែលគ្នា', en: 'on-device · Jev says the options are close' },
 }
 
 const FREQUENCIES: { value: SeedFrequency; km: string; en: string }[] = [
