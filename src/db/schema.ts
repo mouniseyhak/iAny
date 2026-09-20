@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS habit_items (
   samples int NOT NULL DEFAULT 0,
   rating real,
   available boolean NOT NULL DEFAULT true,
+  -- Cadence the user stated at setup ("I eat this most days"), in days. Lets
+  -- rotation work immediately instead of waiting for the log to reveal it;
+  -- superseded by observations once enough real entries exist. embedding stays
+  -- NULL for items typed rather than photographed.
+  seed_gap_days int,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz

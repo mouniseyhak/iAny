@@ -12,6 +12,8 @@ import {
   calendarDaysBetween,
   sanitizeTags,
   slotFor,
+  seedCandidate,
+  seedGapDays,
   stateKey,
   weatherBucket,
 } from './state'
@@ -132,6 +134,55 @@ ok('confidence grows with history',
    localConfidence(state({ historyCount: 10 })) < localConfidence(state({ historyCount: 50 })))
 ok('confidence is capped', localConfidence(state({ historyCount: 10_000 })) <= 0.9)
 ok('cold start stays below the fallback floor', localConfidence(state({ historyCount: 3 })) < 0.6)
+
+console.log('\nseeding (favourites typed at setup, no waiting)')
+const seeded = seedCandidate('uuid-1', 'meal', ['soup', 'ស៊ុប'], 'weekly')
+ok('seeded item has no observations yet',
+   seeded.daysSinceUsed === null && seeded.timesUsed === 0)
+ok('seeded item carries the stated cadence', seeded.expectedGapDays === 7)
+ok('seeded tags are sanitized', seeded.tags.join() === 'soup')
+ok('frequency maps to a gap', seedGapDays('daily') === 2 && seedGapDays('rare') === 30)
+
+// A seeded list still answers, because weather and slot fit need no history.
+const seedList = state({
+  historyCount: 0,
+  candidates: [
+    seedCandidate('salad', 'meal', ['salad', 'light'], 'sometimes'),
+    seedCandidate('soup', 'meal', ['soup'], 'weekly'),
+    seedCandidate('rice', 'meal', ['rice'], 'daily'),
+    seedCandidate('noodle', 'meal', ['noodle'], 'weekly'),
+    seedCandidate('grill', 'meal', ['grill'], 'rare'),
+  ],
+})
+ok('seeded list answers on a hot day',
+   rankKeys({ ...seedList, weather: 'hot' })[0] === 'salad')
+ok('seeded list answers differently when cool',
+   rankKeys({ ...seedList, weather: 'cool' })[0] === 'soup')
+ok('seeded confidence beats bare cold start',
+   localConfidence(seedList) > localConfidence(state({ historyCount: 0 })))
+ok('seeded confidence stays under the fallback floor',
+   localConfidence(seedList) < 0.6)
+ok('untagged candidates earn no grounding',
+   localConfidence(state({ historyCount: 0, candidates: [cand('x', []), cand('y', [])] })) === 0.2)
+ok('a thin list earns less grounding than a broad one',
+   localConfidence({ ...seedList, candidates: seedList.candidates.slice(0, 2) }) <
+   localConfidence(seedList))
+ok('real history still outranks grounding',
+   localConfidence({ ...seedList, historyCount: 60 }) === 0.9)
+
+// The stated cadence earns its keep from the first real log entry onward.
+const statedDaily = cand('a', ['rice'], { daysSinceUsed: 5, timesUsed: 0, expectedGapDays: 2 })
+const statedRare = cand('b', ['rice'], { daysSinceUsed: 5, timesUsed: 0, expectedGapDays: 30 })
+ok('stated-daily item is overdue after 5 days',
+   scoreCandidate(state({ historyCount: 1 }), statedDaily).reasons.some((r) => r.code === 'overdue'))
+ok('stated-rare item is not overdue after 5 days',
+   !scoreCandidate(state({ historyCount: 1 }), statedRare).reasons.some((r) => r.code === 'overdue'))
+ok('stated cadence outranks an unseen one',
+   scoreOf(state({ historyCount: 1 }), statedDaily) > scoreOf(state({ historyCount: 1 }), statedRare))
+ok('stated cadence overrides the log-derived gap',
+   // 30 uses in 60 entries implies a 2-day rhythm, but the user said "rarely".
+   !scoreCandidate(s, cand('c', ['rice'], { daysSinceUsed: 5, timesUsed: 30, expectedGapDays: 30 }))
+     .reasons.some((r) => r.code === 'overdue'))
 
 console.log('\nranking')
 const ranked = rankLocal(state({ candidates: [

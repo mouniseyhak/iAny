@@ -68,11 +68,15 @@ const round3 = (n: number) => Math.round(n * 1000) / 1000
  */
 function rotationDelta(c: Candidate, historyCount: number): number {
   if (c.daysSinceUsed === null) return 0
-  if (c.timesUsed < 1) return 0
+  // A cadence the user stated at setup wins over one inferred from the log:
+  // it is available immediately, and it is what they believe their own rhythm
+  // to be. Observations take over once `expectedGapDays` is cleared.
+  const stated = c.expectedGapDays ?? null
+  if (stated === null && c.timesUsed < 1) return 0
   // Expected gap = how often this shows up in the log, floored so a brand-new
   // item with one use isn't treated as "due" forever.
-  const expected = Math.max(2, historyCount > 0 ? historyCount / c.timesUsed : 7)
-  const ratio = c.daysSinceUsed / expected
+  const expected = stated ?? Math.max(2, historyCount > 0 ? historyCount / c.timesUsed : 7)
+  const ratio = c.daysSinceUsed / Math.max(1, expected)
   if (ratio >= 1) return Math.min(0.22, 0.10 * ratio)
   return 0
 }
@@ -161,14 +165,30 @@ export function scoreCandidate(state: DecisionState, c: Candidate): Scored {
 }
 
 /**
- * Confidence tracks how much personal history backs the answer. It starts low
- * on purpose: a cold-start suggestion IS a guess, and saying so is what lets
- * the caller reach for a better scorer when there's signal.
+ * Confidence tracks how well-grounded the answer is, from two independent
+ * sources — and takes the better of them.
+ *
+ *  - History: observations of what the person actually chose. Reaches the 0.9
+ *    ceiling at ~60 entries.
+ *  - Grounding: a tagged candidate list, whether typed at setup or learned.
+ *    Weather and slot fit are REAL signals that work with zero history, so a
+ *    seeded list is not a shot in the dark and shouldn't report as one.
+ *
+ * Grounding deliberately tops out at 0.55, below `MIN_CONFIDENCE`. Stated
+ * preferences are weaker evidence than observed behaviour, and staying under
+ * the floor is what makes the system reach for a better scorer when online —
+ * precisely when it has least of its own history to go on.
  */
 export function localConfidence(state: DecisionState): number {
-  const n = state.historyCount
-  if (n <= 0) return 0.2
-  return round3(Math.max(0.2, Math.min(0.9, 0.2 + (n / 60) * 0.7)))
+  const history = 0.2 + (Math.max(0, state.historyCount) / 60) * 0.7
+
+  const n = state.candidates.length
+  const tagged = n > 0 ? state.candidates.filter((c) => c.tags.length > 0).length / n : 0
+  // A two-item list can't support much confidence however well tagged it is.
+  const breadth = Math.min(1, n / 5)
+  const grounding = 0.2 + tagged * breadth * 0.35
+
+  return round3(Math.max(0.2, Math.min(0.9, Math.max(history, grounding))))
 }
 
 /** Highest score first; stable by key so equal scores never shuffle. */

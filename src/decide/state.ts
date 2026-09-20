@@ -69,6 +69,13 @@ export interface Candidate {
   daysSinceUsed: number | null
   /** How many times it appears in the log (the habit signal). */
   timesUsed: number
+  /**
+   * Typical days between uses, when the user told us directly at setup
+   * ("I eat this most days"). Lets rotation work from minute one instead of
+   * waiting two weeks for the log to reveal the same cadence. Null means
+   * "derive it from the log", which is what real history does.
+   */
+  expectedGapDays?: number | null
   /** User feedback, -1..1; null = never rated. */
   rating: number | null
   /** Outfit: is it clean? Meal: is it obtainable right now? */
@@ -160,6 +167,57 @@ export function agoBucket(days: number | null): string {
   if (days < 7) return '3-6'
   if (days < 14) return '7-13'
   return '14+'
+}
+
+/**
+ * How often the user says they eat / wear something, asked once at setup.
+ *
+ * This is the cold-start fix: a favourites list alone gives the engine items
+ * but no rhythm, so rotation and variety stay dark until the log fills up.
+ * One extra tap per item ("most days / most weeks / now and then / rarely")
+ * supplies that rhythm immediately — no fabricated history required.
+ */
+export type SeedFrequency = 'daily' | 'weekly' | 'sometimes' | 'rare'
+
+const SEED_GAP_DAYS: Record<SeedFrequency, number> = {
+  daily: 2,
+  weekly: 7,
+  sometimes: 14,
+  rare: 30,
+}
+
+export function seedGapDays(freq: SeedFrequency): number {
+  return SEED_GAP_DAYS[freq]
+}
+
+/**
+ * Builds a candidate from what the user typed at setup.
+ *
+ * `timesUsed` stays 0 and `historyCount` is untouched on purpose: these are
+ * stated preferences, not observations, and inflating the log would make
+ * `localConfidence()` lie about how well-grounded the answer is.
+ *
+ * `daysSinceUsed` stays null because nothing has been observed yet — at setup
+ * no item is more overdue than any other, so there is nothing to differentiate.
+ * The stated gap earns its keep from the FIRST real log entry onward, when it
+ * says whether that gap was long or short for THIS item.
+ */
+export function seedCandidate(
+  key: string,
+  domain: Domain,
+  tags: readonly string[],
+  freq: SeedFrequency,
+  rating: number | null = null,
+): Candidate {
+  return {
+    key,
+    tags: sanitizeTags(domain, tags),
+    daysSinceUsed: null,
+    timesUsed: 0,
+    expectedGapDays: SEED_GAP_DAYS[freq],
+    rating,
+    available: true,
+  }
 }
 
 /**

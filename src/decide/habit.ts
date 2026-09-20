@@ -17,9 +17,11 @@ import {
   type RainBucket,
   type Tag,
   type WeatherBucket,
+  type SeedFrequency,
   CANDIDATE_LIMIT,
   calendarDaysBetween,
   sanitizeTags,
+  seedGapDays,
   slotFor,
 } from './state'
 
@@ -33,9 +35,13 @@ interface ItemRow {
   samples: number
   rating: number | null
   available: boolean
+  seed_gap_days: number | null
   times_used: number
   last_at: string | null
 }
+
+/** Observations supersede the stated cadence once there are enough of them. */
+const SEED_HANDOVER_USES = 3
 
 /** Nearest stored items for a fresh photo embedding. */
 export async function findMatches(
@@ -53,6 +59,30 @@ export async function findMatches(
     [toVectorLiteral(embedding), domain, k],
   )
   return res.rows.map((r) => ({ itemId: r.id, distance: r.distance }))
+}
+
+/**
+ * Adds a favourite the user typed at setup, with no photo.
+ *
+ * This is the cold-start path: rather than waiting two weeks for a log to
+ * build, the user lists what they already eat or wear and how often. The item
+ * gets a NULL embedding — it simply isn't photo-matchable until the first
+ * photo is confirmed against it, which `reinforceItem` handles.
+ */
+export async function seedItem(
+  domain: Domain,
+  label: string,
+  tags: readonly string[],
+  freq: SeedFrequency,
+): Promise<string> {
+  const db = await getDB()
+  const id = crypto.randomUUID()
+  await db.query(
+    `INSERT INTO habit_items (id, domain, label, tags, seed_gap_days, samples)
+     VALUES ($1, $2, $3, $4, $5, 0)`,
+    [id, domain, label, sanitizeTags(domain, tags), seedGapDays(freq)],
+  )
+  return id
 }
 
 /** First sighting of something new — the user supplies the Khmer name. */
@@ -158,14 +188,17 @@ export async function buildState(
   const now = env.now ?? new Date()
 
   const items = await db.query<ItemRow>(
-    `SELECT i.id, i.label, i.tags, i.samples, i.rating, i.available,
+    `SELECT i.id, i.label, i.tags, i.samples, i.rating, i.available, i.seed_gap_days,
             count(l.id)::int AS times_used,
             max(l.at)::text  AS last_at
      FROM habit_items i
      LEFT JOIN habit_log l ON l.item_id = i.id AND l.deleted_at IS NULL
      WHERE i.domain = $1 AND i.deleted_at IS NULL
      GROUP BY i.id
-     ORDER BY count(l.id) DESC
+     -- Seeded items all have zero log entries, so without the cadence
+     -- tie-break a user's daily staples could be truncated away arbitrarily
+     -- by CANDIDATE_LIMIT before they have logged anything.
+     ORDER BY count(l.id) DESC, i.seed_gap_days ASC NULLS LAST, i.created_at
      LIMIT $2`,
     [domain, CANDIDATE_LIMIT],
   )
@@ -189,6 +222,8 @@ export async function buildState(
     tags: sanitizeTags(domain, r.tags ?? []),
     daysSinceUsed: r.last_at ? calendarDaysBetween(new Date(r.last_at), now) : null,
     timesUsed: r.times_used,
+    // Hand over from what they said to what they did, once we've seen enough.
+    expectedGapDays: r.times_used >= SEED_HANDOVER_USES ? null : r.seed_gap_days,
     rating: r.rating,
     available: r.available,
   }))
