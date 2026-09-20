@@ -37,13 +37,13 @@
   },
   // Shared answer cache for /api/decide. Because the cache key is built from
   // bucketed enums, different people in the same situation share a key, so one
-  // miss warms the answer for everyone. Create it once:
+  // miss warms the answer for everyone. Entries expire after 24h (see
+  // worker/decide.ts CACHE_TTL_SECONDS). Created with:
   //   npx wrangler kv namespace create DECIDE_CACHE
-  // then paste the returned id below and redeploy.
   "kv_namespaces": [
     {
       "binding": "DECIDE_CACHE",
-      "id": "PLACEHOLDER_RUN_WRANGLER_KV_NAMESPACE_CREATE"
+      "id": "e62d7953ae5f46e79508af20eabfd5f4"
     }
   ],
   // Daily purge of news past its 7-day TTL (worker `scheduled` handler).
