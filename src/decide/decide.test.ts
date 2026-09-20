@@ -538,5 +538,37 @@ const solo = state({ historyCount: 0, candidates: [cand('a', ['rice'])] })
 await skipper.rank(solo)
 ok('one option says so, not "unreachable"', skipper.lastReason === 'single-option')
 
+console.log('\ncompare mode (the Jev test bench)')
+// Always calls, even when the production path would not have bothered.
+let compareCalls = 0
+const bench = new JevScorer('/api/decide', (async () => {
+  compareCalls++
+  return new Response(JSON.stringify({ answers: {
+    pick: { type: 'choice', choice: 'opt_1', confidence: 0.2,
+            probabilities: { opt_1: 0.55, opt_2: 0.45 } },
+  } }))
+}) as unknown as typeof fetch)
+const confidentState = state({ historyCount: 60, candidates: [
+  cand('a', ['rice'], { daysSinceUsed: 20 }), cand('b', ['soup'], { daysSinceUsed: 1 }) ] })
+await bench.rank(confidentState)
+ok('production path skips the call when confident', compareCalls === 0)
+const comp = await bench.compare(confidentState)
+ok('compare always calls', compareCalls === 1)
+ok('compare returns both rankings', comp.local.length === 2 && comp.remote?.length === 2)
+ok('Jev scores are raw probabilities, not blended',
+   comp.remote?.[0]?.score === 0.55 && comp.local[0]!.score !== 0.55)
+ok('Jev ranking carries no local reasons',
+   (comp.remote ?? []).every((r) => r.reasons.every((x) => x.code === 'tag-fatigue' || x.code === 'unavailable')))
+ok('compare reports the gate instead of applying it',
+   comp.remote !== null && comp.gate?.verdict === 'self-doubt')
+ok('agreement is computed on the top picks', typeof comp.agree === 'boolean')
+
+const benchDown = new JevScorer('/api/decide', (async () => {
+  throw new Error('offline')
+}) as unknown as typeof fetch)
+const compDown = await benchDown.compare(confidentState)
+ok('compare survives an unreachable server',
+   compDown.remote === null && compDown.failure === 'unreachable' && compDown.local.length === 2)
+
 console.log(`\n${fails.length ? '❌' : '✅'} ${pass} passed, ${fails.length} failed`)
 if (fails.length) throw new Error(fails.join('; '))

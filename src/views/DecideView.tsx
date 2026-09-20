@@ -25,7 +25,7 @@ import {
   seedItem,
   setAvailable,
 } from '../decide/habit'
-import { type ScoreReason, JevScorer, remoteGate } from '../decide/jev'
+import { type Comparison, type ScoreReason, JevScorer, remoteGate } from '../decide/jev'
 import { localConfidence } from '../decide/suggest'
 
 /**
@@ -264,6 +264,8 @@ export function DecideView() {
   const [draftLabel, setDraftLabel] = useState('')
   const [draftTags, setDraftTags] = useState<Tag[]>([])
   const [draftFreq, setDraftFreq] = useState<SeedFrequency>('weekly')
+  const [compareMode, setCompareMode] = useState(false)
+  const [comparison, setComparison] = useState<Comparison | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
 
@@ -310,6 +312,15 @@ export function DecideView() {
         return
       }
       const scorer = new JevScorer()
+      if (compareMode) {
+        // The test bench: both scorers, ungated, unmerged — see JevScorer.compare.
+        const comp = await scorer.compare(state)
+        setComparison(comp)
+        setResults(null)
+        setLabels(await labelsFor(comp.local.map((r) => r.key)))
+        return
+      }
+      setComparison(null)
       const ranked = await scorer.rank(state)
       setResults(ranked)
       setReason(scorer.lastReason)
@@ -421,6 +432,66 @@ export function DecideView() {
           <button className="decide-ask" onClick={() => void ask()} disabled={busy}>
             {busy ? (km ? 'កំពុងគិត…' : 'Thinking…') : (km ? ui.askKm : ui.askEn)}
           </button>
+
+          <label className="decide-toggle">
+            <input
+              type="checkbox"
+              checked={compareMode}
+              onChange={(e) => { setCompareMode(e.target.checked); setResults(null); setComparison(null) }}
+            />
+            🔬 {km ? 'ប្រៀបធៀប ឧបករណ៍ / Jev (សម្រាប់សាកល្បង)' : 'Compare device vs Jev (test mode)'}
+          </label>
+
+          {comparison && (
+            <>
+              <p className="decide-status">
+                {comparison.remote === null
+                  ? (km ? 'Jev មិនបានឆ្លើយ' : 'Jev did not answer') +
+                    (comparison.detail ? ` — ${comparison.detail}` : comparison.status ? ` (${comparison.status})` : '')
+                  : comparison.agree
+                    ? (km ? '✓ ទាំងពីរជ្រើសដូចគ្នា' : '✓ Both pick the same')
+                    : (km ? '✗ ជ្រើសខុសគ្នា' : '✗ They disagree')}
+              </p>
+              <div className="decide-comparegrid">
+                <div>
+                  <h3 className="decide-colhead">📱 {km ? 'ឧបករណ៍' : 'Device'}</h3>
+                  {comparison.local.map((r) => (
+                    <div key={r.key} className="decide-mini">
+                      <span className="decide-minilabel">{labels.get(r.key) ?? r.key}</span>
+                      <span className="decide-score">{Math.round(r.score * 100)}</span>
+                      <div className="decide-bar"><i style={{ width: `${Math.round(r.score * 100)}%` }} /></div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <h3 className="decide-colhead">🌐 Jev</h3>
+                  {comparison.remote
+                    ? comparison.remote.map((r) => (
+                      <div key={r.key} className="decide-mini">
+                        <span className="decide-minilabel">{labels.get(r.key) ?? r.key}</span>
+                        <span className="decide-score">{Math.round(r.score * 100)}</span>
+                        <div className="decide-bar"><i style={{ width: `${Math.round(r.score * 100)}%` }} /></div>
+                      </div>
+                    ))
+                    : <p className="decide-empty">—</p>}
+                </div>
+              </div>
+              {comparison.remoteMeta && comparison.gate && (
+                <p className="decide-meta">
+                  Jev · top {comparison.remoteMeta.top.toFixed(2)} · conf{' '}
+                  {comparison.remoteMeta.confidence.toFixed(2)} · lift {comparison.gate.lift.toFixed(2)} ·{' '}
+                  {comparison.gate.verdict === 'ok'
+                    ? (km ? 'ផ្លូវធម្មតានឹងប្រើចម្លើយនេះ' : 'the normal mode would USE this answer')
+                    : (km ? 'ផ្លូវធម្មតានឹងមិនប្រើ' : `the normal mode would DISCARD this (${comparison.gate.verdict})`)}
+                </p>
+              )}
+              <p className="decide-hint">
+                {km
+                  ? 'ពិន្ទុ Jev ជាភាគរយប្រូបាប — មិនលាយនឹងពិន្ទុឧបករណ៍ទេ។'
+                  : 'Jev scores are raw probabilities; device scores are the offline scorer. Nothing is blended in this view.'}
+              </p>
+            </>
+          )}
 
           {results?.length === 0 && (
             <p className="decide-empty">

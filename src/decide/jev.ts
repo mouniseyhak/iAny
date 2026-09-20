@@ -334,12 +334,28 @@ export type ScoreReason =
   | 'server-error'    // the endpoint answered, but not with 2xx
   | 'low-confidence'  // the model answered below the floor, so it was discarded
 
+/** Everything a side-by-side test run needs, with nothing blended. */
+export interface Comparison {
+  /** The on-device ranking, exactly as the offline path would show it. */
+  local: Scored[]
+  /** Jev's ranking — raw probabilities, NOT merged with local reasons, and
+   *  NOT gated: shown even when the production path would discard it. */
+  remote: Scored[] | null
+  gate: { verdict: GateVerdict; lift: number; confFloor: number } | null
+  remoteMeta: { confidence: number; top: number; options: number } | null
+  /** Do the two top picks match? Null when either side is missing. */
+  agree: boolean | null
+  failure: ScoreReason | null
+  status: number
+  detail: string
+}
+
 /**
  * Remote scorer with an unconditional local fallback.
  *
- * Falls back on: offline, HTTP error, empty candidate set, or a confidence
- * below the floor. The caller cannot end up with no answer — and `lastReason`
- * says which of those happened.
+ * Falls back on: offline, HTTP error, empty candidate set, or an
+ * uninformative answer. The caller cannot end up with no answer — and
+ * `lastReason` says which of those happened.
  */
 export class JevScorer implements Scorer {
   /** Which scorer actually produced the last result, for the UI to show. */
@@ -361,6 +377,39 @@ export class JevScorer implements Scorer {
     private fetchImpl: typeof fetch = globalThis.fetch?.bind(globalThis),
   ) {}
 
+  /** One transport for both the production path and the test bench, so a
+   *  comparison exercises exactly the request the real path sends. */
+  private async callRemote(state: DecisionState): Promise<
+    | { ok: true; ranked: Scored[]; meta: { confidence: number; top: number; options: number } }
+    | { ok: false; reason: 'unreachable' | 'server-error'; status: number; detail: string }
+  > {
+    try {
+      const res = await this.fetchImpl(this.endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: stateKey(state), request: buildRequest(state) }),
+      })
+      if (!res.ok) {
+        let detail = ''
+        try {
+          const body = (await res.json()) as { error?: string; detail?: string }
+          detail = [body.error, body.detail].filter(Boolean).join(': ').slice(0, 300)
+        } catch { /* body unreadable — the status alone will have to do */ }
+        return { ok: false, reason: 'server-error', status: res.status, detail }
+      }
+      const ranked = readRanking(state, (await res.json()) as JevResponse)
+      const top = ranked[0]
+      const options = state.candidates.filter((c) => c.available).length
+      return {
+        ok: true,
+        ranked,
+        meta: { confidence: top?.confidence ?? 0, top: top?.score ?? 0, options },
+      }
+    } catch {
+      return { ok: false, reason: 'unreachable', status: 0, detail: '' }
+    }
+  }
+
   async rank(state: DecisionState): Promise<Scored[]> {
     const local = rankLocal(state)
     this.lastSource = 'local'
@@ -380,43 +429,57 @@ export class JevScorer implements Scorer {
         state.candidates.filter((c) => c.available).length < 2 ? 'single-option' : 'not-needed'
       return local
     }
-    try {
-      const res = await this.fetchImpl(this.endpoint, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ key: stateKey(state), request: buildRequest(state) }),
-      })
-      if (!res.ok) {
-        this.lastReason = 'server-error'
-        this.lastStatus = res.status
-        try {
-          const body = (await res.json()) as { error?: string; detail?: string }
-          this.lastDetail = [body.error, body.detail].filter(Boolean).join(': ').slice(0, 300)
-        } catch {
-          this.lastDetail = ''
-    this.lastRemote = null
-        }
-        return local
-      }
-      const remote = readRanking(state, (await res.json()) as JevResponse)
-      const top = remote[0]
-      const options = state.candidates.filter((c) => c.available).length
-      this.lastRemote = top
-        ? { confidence: top.confidence, top: top.score, options }
-        : null
-      if (!top || !remoteIsInformative(top.confidence, top.score, options)) {
-        this.lastReason = 'low-confidence'
-        return local
-      }
-      // Keep the local reasons alongside the remote score: the user still gets
-      // a breakdown they can argue with, whichever scorer produced the number.
-      const byKey = new Map(local.map((s) => [s.key, s.reasons]))
-      this.lastSource = 'remote'
-      this.lastReason = 'used'
-      return remote.map((s) => ({ ...s, reasons: [...(byKey.get(s.key) ?? []), ...s.reasons] }))
-    } catch {
-      this.lastReason = 'unreachable'
+    const r = await this.callRemote(state)
+    if (!r.ok) {
+      this.lastReason = r.reason
+      this.lastStatus = r.status
+      this.lastDetail = r.detail
       return local
+    }
+    this.lastRemote = r.meta
+    if (!remoteIsInformative(r.meta.confidence, r.meta.top, r.meta.options)) {
+      this.lastReason = 'low-confidence'
+      return local
+    }
+    // Keep the local reasons alongside the remote score: the user still gets
+    // a breakdown they can argue with, whichever scorer produced the number.
+    const byKey = new Map(local.map((s) => [s.key, s.reasons]))
+    this.lastSource = 'remote'
+    this.lastReason = 'used'
+    return r.ranked.map((s) => ({ ...s, reasons: [...(byKey.get(s.key) ?? []), ...s.reasons] }))
+  }
+
+  /**
+   * The test bench: both scorers on the SAME state, kept apart.
+   *
+   * Unlike rank(), this always calls the model (no cost gate — the point is to
+   * exercise it), never merges local reasons into Jev's ranking, and returns
+   * Jev's answer even when the production gate would discard it. The gate
+   * verdict is reported alongside instead, so "what did Jev say" and "would
+   * the normal mode have used it" are separately visible — which is what
+   * testing capacity means.
+   */
+  async compare(state: DecisionState): Promise<Comparison> {
+    const local = rankLocal(state)
+    const none = { gate: null, remoteMeta: null, agree: null, status: 0, detail: '' }
+    if (!this.fetchImpl || state.candidates.filter((c) => c.available).length < 2) {
+      return { ...none, local, remote: null, failure: 'single-option' }
+    }
+    const r = await this.callRemote(state)
+    if (!r.ok) {
+      return { ...none, local, remote: null, failure: r.reason, status: r.status, detail: r.detail }
+    }
+    const first = local.find((x) => x.score > 0)
+    const rfirst = r.ranked.find((x) => x.score > 0)
+    return {
+      local,
+      remote: r.ranked,
+      gate: remoteGate(r.meta.confidence, r.meta.top, r.meta.options),
+      remoteMeta: r.meta,
+      agree: first && rfirst ? first.key === rfirst.key : null,
+      failure: null,
+      status: 0,
+      detail: '',
     }
   }
 }
