@@ -1,4 +1,5 @@
 import { EMBEDDING_DIMS } from '../types'
+import { VISION_DIMS } from '../decide/match'
 
 /**
  * Schema notes:
@@ -59,4 +60,44 @@ CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id);
 CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv);
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx
   ON chunks USING hnsw (embedding vector_cosine_ops);
+
+-- Decide (see ../decide/): the personal habit log behind "what should I eat /
+-- wear today?". habit_items is the user's own vocabulary — the Khmer name and
+-- a visual centroid learned from their confirmed photos; habit_log is what
+-- they actually chose, and when. Both stay on the device: only opaque ids and
+-- controlled tags are ever built into a remote request (see decide/state.ts).
+-- The vector width is VISION_DIMS, NOT EMBEDDING_DIMS — image embeddings are a
+-- different model and a different width from the text ones in chunks.
+CREATE TABLE IF NOT EXISTS habit_items (
+  id uuid PRIMARY KEY,
+  domain text NOT NULL,
+  label text NOT NULL,
+  tags text[] NOT NULL DEFAULT '{}',
+  embedding vector(${VISION_DIMS}),
+  samples int NOT NULL DEFAULT 0,
+  rating real,
+  available boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS habit_log (
+  id uuid PRIMARY KEY,
+  item_id uuid REFERENCES habit_items(id) ON DELETE CASCADE,
+  domain text NOT NULL,
+  slot text NOT NULL,
+  at timestamptz NOT NULL DEFAULT now(),
+  confirmed boolean NOT NULL DEFAULT false,
+  thumb text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS habit_items_domain_idx ON habit_items (domain);
+CREATE INDEX IF NOT EXISTS habit_log_item_idx ON habit_log (item_id);
+CREATE INDEX IF NOT EXISTS habit_log_at_idx ON habit_log (at DESC);
+CREATE INDEX IF NOT EXISTS habit_items_embedding_idx
+  ON habit_items USING hnsw (embedding vector_cosine_ops);
 `
