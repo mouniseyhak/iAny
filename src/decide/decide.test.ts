@@ -6,8 +6,12 @@
  */
 import {
   type Candidate,
+  type ContextMap,
   type DecisionState,
+  type EnergyBucket,
+  type RainBucket,
   type Tag,
+  type WeatherBucket,
   agoBucket,
   calendarDaysBetween,
   sanitizeTags,
@@ -34,17 +38,31 @@ const cand = (key: string, tags: string[], over: Partial<Candidate> = {}): Candi
   ...over,
 })
 
-const state = (over: Partial<DecisionState> = {}): DecisionState => ({
-  domain: 'meal',
-  slot: 'midday',
-  dayType: 'work',
-  weather: 'warm',
-  rain: 'dry',
-  historyCount: 60,
-  recentTags: [],
-  candidates: [],
-  ...over,
-})
+// The helper lifts weather/rain/energy into the context map, so the dozens of
+// existing call sites read the same as before the context generalisation.
+type StateOver = Partial<Omit<DecisionState, 'context'>> & {
+  weather?: WeatherBucket
+  rain?: RainBucket
+  energy?: EnergyBucket
+  context?: ContextMap
+}
+const state = (over: StateOver = {}): DecisionState => {
+  const { weather, rain, energy, context, ...rest } = over
+  return {
+    domain: 'meal',
+    slot: 'midday',
+    dayType: 'work',
+    context: context ?? {
+      weather: weather ?? 'warm',
+      rain: rain ?? 'dry',
+      ...(energy ? { energy } : {}),
+    },
+    historyCount: 60,
+    recentTags: [],
+    candidates: [],
+    ...rest,
+  }
+}
 
 const scoreOf = (s: DecisionState, c: Candidate) => scoreCandidate(s, c).score
 const rankKeys = (s: DecisionState) => rankLocal(s).map((r) => r.key)
@@ -154,6 +172,57 @@ const rainy = state({ domain: 'outfit', rain: 'rain' })
 ok('rain prefers rain-proof',
    scoreOf(rainy, cand('a', ['rain-proof'])) > scoreOf(rainy, cand('b', ['light'])))
 
+console.log('\nexercise (recovery is the laundry rule)')
+const ex = (over: StateOver = {}) => state({ domain: 'exercise', ...over })
+ok('exercise vocabulary is its own', sanitizeTags('exercise', ['run', 'soup']).join() === 'run')
+ok('tired → gentle beats intense',
+   scoreOf(ex({ energy: 'low' }), cand('a', ['gentle', 'stretch'])) >
+   scoreOf(ex({ energy: 'low' }), cand('b', ['intense', 'strength'])))
+ok('fresh → intense beats gentle',
+   scoreOf(ex({ energy: 'high' }), cand('a', ['intense', 'strength'])) >
+   scoreOf(ex({ energy: 'high' }), cand('b', ['gentle'])))
+ok('tiredness is cited, not blamed on weather',
+   scoreCandidate(ex({ energy: 'low' }), cand('a', ['intense'])).reasons
+     .some((r) => r.code === 'energy-clash'))
+ok('rain moves training indoors',
+   scoreOf(ex({ rain: 'rain' }), cand('a', ['strength', 'indoor'])) >
+   scoreOf(ex({ rain: 'rain' }), cand('b', ['run', 'outdoor'])))
+ok('heat favours the pool',
+   scoreOf(ex({ weather: 'hot' }), cand('a', ['swim'])) >
+   scoreOf(ex({ weather: 'hot' }), cand('b', ['run', 'outdoor'])))
+ok('legs done yesterday need recovery',
+   scoreCandidate(ex(), cand('a', ['legs', 'strength'], { daysSinceUsed: 1 })).reasons
+     .some((r) => r.code === 'too-recent'))
+ok('trained legs yesterday → arms today',
+   rankKeys(ex({ candidates: [
+     cand('legs', ['legs', 'strength'], { daysSinceUsed: 1 }),
+     cand('arms', ['arms', 'strength'], { daysSinceUsed: 4 }),
+   ] }))[0] === 'arms')
+
+console.log('\nstudy (rotation is spaced repetition)')
+const st = (over: StateOver = {}) => state({ domain: 'study', context: { energy: 'normal' }, ...over })
+ok('study vocabulary is its own', sanitizeTags('study', ['review', 'rice']).join() === 'review')
+ok('fresh mornings take new material',
+   scoreOf(st({ slot: 'morning' }), cand('a', ['new', 'hard'])) >
+   scoreOf(st({ slot: 'morning' }), cand('b', ['review', 'easy'])))
+ok('tired evenings take review',
+   scoreOf(st({ slot: 'evening', context: { energy: 'low' } }), cand('a', ['review', 'easy'])) >
+   scoreOf(st({ slot: 'evening', context: { energy: 'low' } }), cand('b', ['new', 'hard'])))
+ok('work days take short sessions',
+   scoreOf(st(), cand('a', ['short'])) > scoreOf(st(), cand('b', ['long'])))
+ok('a topic untouched for weeks is due',
+   scoreCandidate(st(), cand('a', ['vocabulary'], { daysSinceUsed: 30, timesUsed: 10 })).reasons
+     .some((r) => r.code === 'overdue'))
+// Study never supplies weather, so it must not fragment the cache with it —
+// and must never mention the sky to the model.
+ok('study cache key carries no weather',
+   !stateKey(st({ candidates: [cand('a', ['review'])] })).includes('weather'))
+ok('study request never mentions weather',
+   !describeState(st()).toLowerCase().includes('weather'))
+ok('meal and study in the same situation stay distinct keys',
+   stateKey(st({ candidates: [cand('a', ['review'])] })) !==
+   stateKey(state({ domain: 'meal', context: { energy: 'normal' }, candidates: [cand('a', ['review'] as unknown as string[] as Tag[])] })))
+
 console.log('\nslot and day type')
 ok('morning prefers noodle over heavy',
    scoreOf(morning, cand('a', ['noodle'])) > scoreOf(morning, cand('b', ['heavy'])))
@@ -200,9 +269,9 @@ const seedList = state({
   ],
 })
 ok('seeded list answers on a hot day',
-   rankKeys({ ...seedList, weather: 'hot' })[0] === 'salad')
+   rankKeys({ ...seedList, context: { weather: 'hot', rain: 'dry' } })[0] === 'salad')
 ok('seeded list answers differently when cool',
-   rankKeys({ ...seedList, weather: 'cool' })[0] === 'soup')
+   rankKeys({ ...seedList, context: { weather: 'cool', rain: 'dry' } })[0] === 'soup')
 ok('seeded confidence beats bare cold start',
    localConfidence(seedList) > localConfidence(state({ historyCount: 0 })))
 ok('seeded confidence stays under the fallback floor',
@@ -303,7 +372,7 @@ ok('item ids never leave the device',
    !JSON.stringify(qs).includes('uuid-1') && !JSON.stringify(qs).includes('uuid-2'))
 ok('keys are plain identifiers',
    Object.keys(pickQ.criteria).every((k) => /^[a-z][a-z0-9_]*$/.test(k)))
-ok('asks a score and a noul too', qs['heaviness']?.type === 'score' && qs['needs_variety']?.type === 'noul')
+ok('asks a score and a noul too', qs['effort']?.type === 'score' && qs['needs_variety']?.type === 'noul')
 
 const remote = readRanking(remoteState, {
   answers: {
@@ -333,7 +402,7 @@ ok('same situation on two devices = same cache key',
 ok('no item id appears in the cache key',
    !stateKey(deviceA).includes('11111111') && !stateKey(deviceA).includes('22222222'))
 ok('a different situation still differs',
-   stateKey(deviceA) !== stateKey({ ...deviceA, weather: 'hot' }))
+   stateKey(deviceA) !== stateKey({ ...deviceA, context: { weather: 'hot', rain: 'dry' } }))
 // An answer cached by A must map onto B's own ids, not A's.
 const cached = { answers: { pick: { type: 'choice', choice: 'opt_2',
   confidence: 0.9, probabilities: { opt_1: 0.2, opt_2: 0.8 } } } }

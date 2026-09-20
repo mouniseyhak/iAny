@@ -17,8 +17,10 @@
  * Khmer locally, so the language never round-trips.
  */
 
-/** Both domains run the same engine; only the tag vocabulary differs. */
-export type Domain = 'meal' | 'outfit'
+/** All domains run the same engine; only vocabulary and weights differ. */
+export type Domain = 'meal' | 'outfit' | 'exercise' | 'study'
+
+export const DOMAINS: readonly Domain[] = ['meal', 'outfit', 'exercise', 'study']
 
 /** Coarse time of day. Meals and outfits both hang off it. */
 export type Slot = 'morning' | 'midday' | 'evening'
@@ -31,10 +33,53 @@ export type WeatherBucket = 'cool' | 'warm' | 'hot'
 
 export type RainBucket = 'dry' | 'showers' | 'rain'
 
+/** How much is left in the tank. Drives exercise and study, ignored by meals. */
+export type EnergyBucket = 'low' | 'normal' | 'high'
+
+/**
+ * Situational dimensions, as an open map rather than fixed fields.
+ *
+ * Weather and rain were hardcoded when meals and outfits were the only
+ * domains. Exercise needs "how tired am I" and study ignores the weather
+ * entirely, so a fourth literal field would have been the wrong shape: every
+ * domain would carry dimensions it has no use for. A map lets each domain
+ * supply only what its weights actually read, and `stateKey` stays
+ * deterministic because the entries are sorted.
+ */
+export type ContextDim = 'weather' | 'rain' | 'energy'
+export type ContextMap = Partial<Record<ContextDim, string>>
+
+/** Which dimensions a domain actually asks about. */
+export const DOMAIN_CONTEXT: Record<Domain, ContextDim[]> = {
+  meal: ['weather', 'rain'],
+  outfit: ['weather', 'rain'],
+  exercise: ['weather', 'rain', 'energy'],
+  // Study is indoors and indifferent to the sky; only the tank matters.
+  study: ['energy'],
+}
+
 /**
  * Controlled tag vocabulary. Closed on purpose — an open vocabulary would
  * leak free text off-device and blow up the cache key space.
  */
+export const EXERCISE_TAGS = [
+  // Kind
+  'walk', 'run', 'cycle', 'swim', 'strength', 'stretch', 'sport',
+  // What it works — recovery is per body area, so this is the rotation axis
+  'legs', 'arms', 'core', 'full-body',
+  // Effort and shape
+  'gentle', 'intense', 'short', 'long',
+  // Where
+  'indoor', 'outdoor',
+] as const
+
+export const STUDY_TAGS = [
+  // Skill
+  'reading', 'writing', 'listening', 'speaking', 'vocabulary', 'grammar', 'math', 'practice',
+  // Shape of the session
+  'new', 'review', 'short', 'long', 'easy', 'hard',
+] as const
+
 export const MEAL_TAGS = [
   // Kind of dish
   'soup', 'porridge', 'rice', 'noodle', 'grill', 'fried', 'steamed', 'curry', 'salad',
@@ -54,14 +99,27 @@ export const OUTFIT_TAGS = [
 
 export type MealTag = (typeof MEAL_TAGS)[number]
 export type OutfitTag = (typeof OUTFIT_TAGS)[number]
-export type Tag = MealTag | OutfitTag
+export type ExerciseTag = (typeof EXERCISE_TAGS)[number]
+export type StudyTag = (typeof STUDY_TAGS)[number]
+export type Tag = MealTag | OutfitTag | ExerciseTag | StudyTag
 
-const MEAL_TAG_SET: ReadonlySet<string> = new Set(MEAL_TAGS)
-const OUTFIT_TAG_SET: ReadonlySet<string> = new Set(OUTFIT_TAGS)
+export const DOMAIN_TAGS: Record<Domain, readonly Tag[]> = {
+  meal: MEAL_TAGS,
+  outfit: OUTFIT_TAGS,
+  exercise: EXERCISE_TAGS,
+  study: STUDY_TAGS,
+}
+
+const TAG_SETS: Record<Domain, ReadonlySet<string>> = {
+  meal: new Set(MEAL_TAGS),
+  outfit: new Set(OUTFIT_TAGS),
+  exercise: new Set(EXERCISE_TAGS),
+  study: new Set(STUDY_TAGS),
+}
 
 /** Drops anything outside the vocabulary — the off-device leak guard. */
 export function sanitizeTags(domain: Domain, tags: readonly string[]): Tag[] {
-  const allowed = domain === 'meal' ? MEAL_TAG_SET : OUTFIT_TAG_SET
+  const allowed = TAG_SETS[domain] ?? TAG_SETS.meal
   const out: Tag[] = []
   for (const t of tags) if (allowed.has(t) && !out.includes(t as Tag)) out.push(t as Tag)
   return out.sort()
@@ -96,8 +154,8 @@ export interface DecisionState {
   domain: Domain
   slot: Slot
   dayType: DayType
-  weather: WeatherBucket
-  rain: RainBucket
+  /** Only the dimensions this domain reads — see `DOMAIN_CONTEXT`. */
+  context: ContextMap
   /** Total log entries for this domain — drives local-scorer confidence. */
   historyCount: number
   /** Tags dominating the last few entries, for the variety penalty. */
@@ -112,6 +170,8 @@ export type ReasonCode =
   | 'tag-fatigue'    // four fried days in a row
   | 'weather-fit'
   | 'weather-clash'
+  | 'energy-fit'     // gentle when you're spent
+  | 'energy-clash'   // too hard for what's left in the tank
   | 'slot-fit'
   | 'slot-clash'
   | 'liked'
@@ -315,8 +375,11 @@ export function stateKey(state: DecisionState): string {
     .join(',')
   const recent = [...state.recentTags].sort().join('+')
   const depth = state.historyCount < 10 ? 'new' : state.historyCount < 60 ? 'some' : 'deep'
-  return [
-    'v1', state.domain, state.slot, state.dayType,
-    state.weather, state.rain, depth, recent, cands,
-  ].join('|')
+  // Context entries sorted so the key can't vary with insertion order.
+  const ctx = Object.entries(state.context)
+    .filter(([, v]) => v)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v}`)
+    .join(';')
+  return ['v2', state.domain, state.slot, state.dayType, ctx, depth, recent, cands].join('|')
 }

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
 import {
   type Domain,
+  type EnergyBucket,
   type RainBucket,
   type ReasonCode,
   type Scored,
   type SeedFrequency,
   type Tag,
   type WeatherBucket,
+  DOMAIN_CONTEXT,
+  DOMAINS,
 } from '../decide/state'
 import {
   type ItemSummary,
@@ -52,20 +55,70 @@ function decisiveness(top: number, options: number): { km: string; en: string } 
 
 type Tab = 'ask' | 'items'
 
-/** Reason codes → readable text. Some differ by domain (eat vs wear). */
-const REASONS: Record<ReasonCode, { km: string; en: string; kmWear?: string; enWear?: string }> = {
-  overdue: { km: 'យូរហើយមិនបានញ៉ាំ', en: 'not had in a while', kmWear: 'យូរហើយមិនបានស្លៀក', enWear: 'not worn in a while' },
-  'too-recent': { km: 'ទើបតែញ៉ាំថ្មីៗ', en: 'had it very recently', kmWear: 'ទើបតែស្លៀកថ្មីៗ', enWear: 'worn very recently' },
+type Phrase = { km: string; en: string }
+
+/**
+ * Reason codes → readable text.
+ *
+ * Several read differently per domain: "not had in a while" is right for food,
+ * "needs recovery" for exercise and "due for review" for study. The engine only
+ * ever emits the CODE, which is exactly what lets it stay language-free.
+ */
+const REASONS: Record<ReasonCode, Phrase & Partial<Record<Domain, Phrase>>> = {
+  overdue: {
+    km: 'យូរហើយមិនបានញ៉ាំ', en: 'not had in a while',
+    outfit: { km: 'យូរហើយមិនបានស្លៀក', en: 'not worn in a while' },
+    exercise: { km: 'យូរហើយមិនបានធ្វើ', en: 'not trained in a while' },
+    study: { km: 'ដល់ពេលរំលឹកឡើងវិញ', en: 'due for review' },
+  },
+  'too-recent': {
+    km: 'ទើបតែញ៉ាំថ្មីៗ', en: 'had it very recently',
+    outfit: { km: 'ទើបតែស្លៀកថ្មីៗ', en: 'worn very recently' },
+    exercise: { km: 'ទើបធ្វើ — ត្រូវសម្រាក', en: 'trained recently — needs recovery' },
+    study: { km: 'ទើបតែរៀនរួច', en: 'just covered this' },
+  },
   'tag-fatigue': { km: 'ដដែលៗច្រើនថ្ងៃហើយ', en: 'too much of the same lately' },
   'weather-fit': { km: 'សមនឹងអាកាសធាតុ', en: 'suits the weather' },
   'weather-clash': { km: 'មិនសូវសមនឹងអាកាសធាតុ', en: 'against the weather' },
+  'energy-fit': { km: 'សមនឹងកម្លាំងឥឡូវ', en: 'matches your energy' },
+  'energy-clash': { km: 'ធ្ងន់ពេកសម្រាប់ឥឡូវ', en: 'too demanding right now' },
   'slot-fit': { km: 'សមនឹងពេលវេលា', en: 'suits the time of day' },
   'slot-clash': { km: 'មិនសមនឹងពេលវេលា', en: 'wrong time of day' },
   liked: { km: 'អ្នកចូលចិត្ត', en: 'you like it' },
   disliked: { km: 'អ្នកមិនសូវចូលចិត្ត', en: 'you dislike it' },
-  favourite: { km: 'អ្នកញ៉ាំញឹកញាប់', en: 'a regular of yours', kmWear: 'អ្នកស្លៀកញឹកញាប់' },
+  favourite: {
+    km: 'អ្នកញ៉ាំញឹកញាប់', en: 'a regular of yours',
+    outfit: { km: 'អ្នកស្លៀកញឹកញាប់', en: 'a regular of yours' },
+  },
   untried: { km: 'មិនទាន់បានសាក', en: 'not tried yet' },
-  unavailable: { km: 'មិនមាន / កំពុងបោក', en: 'unavailable / in the wash' },
+  unavailable: {
+    km: 'មិនមាន', en: 'unavailable',
+    outfit: { km: 'កំពុងបោក', en: 'in the wash' },
+  },
+}
+
+/** Per-domain wording for the buttons and headings. */
+const DOMAIN_UI: Record<Domain, { icon: string; km: string; en: string; askKm: string; askEn: string; didKm: string; didEn: string; nameKm: string; nameEn: string }> = {
+  meal: {
+    icon: '🍚', km: 'ញ៉ាំអ្វី?', en: 'What to eat?',
+    askKm: 'ថ្ងៃនេះគួរញ៉ាំអ្វី?', askEn: 'What should I eat today?',
+    didKm: 'ញ៉ាំមួយនេះ', didEn: 'Ate this', nameKm: 'ឈ្មោះម្ហូប', nameEn: 'Dish name',
+  },
+  outfit: {
+    icon: '👕', km: 'ស្លៀកអ្វី?', en: 'What to wear?',
+    askKm: 'ថ្ងៃនេះគួរស្លៀកអ្វី?', askEn: 'What should I wear today?',
+    didKm: 'ស្លៀកមួយនេះ', didEn: 'Wore this', nameKm: 'ឈ្មោះសម្លៀកបំពាក់', nameEn: 'Garment name',
+  },
+  exercise: {
+    icon: '🏃', km: 'ហាត់ប្រាណអ្វី?', en: 'What to train?',
+    askKm: 'ថ្ងៃនេះគួរហាត់អ្វី?', askEn: 'What should I train today?',
+    didKm: 'បានធ្វើ', didEn: 'Did this', nameKm: 'ឈ្មោះលំហាត់', nameEn: 'Activity name',
+  },
+  study: {
+    icon: '📚', km: 'រៀនអ្វី?', en: 'What to study?',
+    askKm: 'ឥឡូវគួររៀនអ្វី?', askEn: 'What should I study now?',
+    didKm: 'បានរៀន', didEn: 'Studied this', nameKm: 'ប្រធានបទ', nameEn: 'Topic name',
+  },
 }
 
 const TAG_TEXT: Partial<Record<Tag, { km: string; en: string }>> = {
@@ -97,6 +150,35 @@ const TAG_TEXT: Partial<Record<Tag, { km: string; en: string }>> = {
   traditional: { km: 'ប្រពៃណី', en: 'traditional' },
   'rain-proof': { km: 'ការពារភ្លៀង', en: 'rain-proof' },
   'sun-protective': { km: 'ការពារកំដៅថ្ងៃ', en: 'sun cover' },
+  walk: { km: 'ដើរ', en: 'walk' },
+  run: { km: 'រត់', en: 'run' },
+  cycle: { km: 'ជិះកង់', en: 'cycling' },
+  swim: { km: 'ហែលទឹក', en: 'swim' },
+  strength: { km: 'លើកទម្ងន់', en: 'strength' },
+  stretch: { km: 'ទាញសាច់ដុំ', en: 'stretching' },
+  sport: { km: 'កីឡា', en: 'sport' },
+  legs: { km: 'ជើង', en: 'legs' },
+  arms: { km: 'ដៃ', en: 'arms' },
+  core: { km: 'ពោះ/ចង្កេះ', en: 'core' },
+  'full-body': { km: 'ទាំងខ្លួន', en: 'full body' },
+  gentle: { km: 'ស្រាលៗ', en: 'gentle' },
+  intense: { km: 'ខ្លាំង', en: 'intense' },
+  short: { km: 'ខ្លី', en: 'short' },
+  long: { km: 'វែង', en: 'long' },
+  indoor: { km: 'ក្នុងផ្ទះ', en: 'indoor' },
+  outdoor: { km: 'ក្រៅផ្ទះ', en: 'outdoor' },
+  reading: { km: 'អាន', en: 'reading' },
+  writing: { km: 'សរសេរ', en: 'writing' },
+  listening: { km: 'ស្តាប់', en: 'listening' },
+  speaking: { km: 'និយាយ', en: 'speaking' },
+  vocabulary: { km: 'វាក្យសព្ទ', en: 'vocabulary' },
+  grammar: { km: 'វេយ្យាករណ៍', en: 'grammar' },
+  math: { km: 'គណិត', en: 'maths' },
+  practice: { km: 'អនុវត្ត', en: 'practice' },
+  new: { km: 'មេរៀនថ្មី', en: 'new material' },
+  review: { km: 'រំលឹក', en: 'review' },
+  easy: { km: 'ងាយ', en: 'easy' },
+  hard: { km: 'ពិបាក', en: 'hard' },
 }
 
 /**
@@ -114,6 +196,17 @@ const TAG_GROUPS: Record<Domain, { km: string; en: string; tags: Tag[] }[]> = {
     { km: 'បែប', en: 'Cut', tags: ['long-sleeve', 'short-sleeve', 'shorts'] },
     { km: 'រចនាបថ', en: 'Style', tags: ['formal', 'casual', 'traditional'] },
     { km: 'អាកាសធាតុ', en: 'Weather', tags: ['rain-proof', 'sun-protective', 'light', 'heavy'] },
+  ],
+  exercise: [
+    { km: 'ប្រភេទ', en: 'Kind', tags: ['walk', 'run', 'cycle', 'swim', 'strength', 'stretch', 'sport'] },
+    // Recovery is per body area, so this is the rotation axis that matters.
+    { km: 'ផ្នែករាងកាយ', en: 'Works', tags: ['legs', 'arms', 'core', 'full-body'] },
+    { km: 'កម្រិត', en: 'Effort', tags: ['gentle', 'intense', 'short', 'long'] },
+    { km: 'ទីកន្លែង', en: 'Where', tags: ['indoor', 'outdoor'] },
+  ],
+  study: [
+    { km: 'ជំនាញ', en: 'Skill', tags: ['reading', 'writing', 'listening', 'speaking', 'vocabulary', 'grammar', 'math', 'practice'] },
+    { km: 'បែបមេរៀន', en: 'Session', tags: ['new', 'review', 'practice', 'short', 'long', 'easy', 'hard'] },
   ],
 }
 
@@ -154,6 +247,7 @@ export function DecideView() {
 
   const [weather, setWeather] = useState<WeatherBucket>('warm')
   const [rain, setRain] = useState<RainBucket>('dry')
+  const [energy, setEnergy] = useState<EnergyBucket>('normal')
 
   const [draftLabel, setDraftLabel] = useState('')
   const [draftTags, setDraftTags] = useState<Tag[]>([])
@@ -161,6 +255,8 @@ export function DecideView() {
 
   const wear = domain === 'outfit'
   const groups = TAG_GROUPS[domain]
+  const ui = DOMAIN_UI[domain]
+  const dims = DOMAIN_CONTEXT[domain]
 
   const refresh = useCallback(async () => {
     try {
@@ -180,8 +276,8 @@ export function DecideView() {
   const reasonText = (code: ReasonCode) => {
     const r = REASONS[code]
     if (!r) return code
-    if (wear) return km ? (r.kmWear ?? r.km) : (r.enWear ?? r.en)
-    return km ? r.km : r.en
+    const p: Phrase = r[domain] ?? r
+    return km ? p.km : p.en
   }
 
   const tagText = (t: Tag) => {
@@ -193,7 +289,7 @@ export function DecideView() {
     setBusy(true)
     setError('')
     try {
-      const state = await buildState(domain, { weather, rain })
+      const state = await buildState(domain, { weather, rain, energy })
       if (state.candidates.length === 0) {
         setResults([])
         setTab('items')
@@ -241,18 +337,16 @@ export function DecideView() {
   return (
     <div className="decide">
       <div className="decide-domains">
-        <button
-          className={`decide-domain ${!wear ? 'is-on' : ''}`}
-          onClick={() => setDomain('meal')}
-        >
-          <span aria-hidden>🍚</span> {km ? 'ញ៉ាំអ្វី?' : 'What to eat?'}
-        </button>
-        <button
-          className={`decide-domain ${wear ? 'is-on' : ''}`}
-          onClick={() => setDomain('outfit')}
-        >
-          <span aria-hidden>👕</span> {km ? 'ស្លៀកអ្វី?' : 'What to wear?'}
-        </button>
+        {DOMAINS.map((d) => (
+          <button
+            key={d}
+            className={`decide-domain ${domain === d ? 'is-on' : ''}`}
+            onClick={() => setDomain(d)}
+          >
+            <span aria-hidden>{DOMAIN_UI[d].icon}</span>{' '}
+            {km ? DOMAIN_UI[d].km : DOMAIN_UI[d].en}
+          </button>
+        ))}
       </div>
 
       <div className="decide-tabs">
@@ -269,39 +363,48 @@ export function DecideView() {
       {tab === 'ask' && (
         <section className="decide-panel">
           <div className="decide-env">
-            <div className="decide-env-group" role="group" aria-label={km ? 'អាកាសធាតុ' : 'Weather'}>
-              {(['cool', 'warm', 'hot'] as WeatherBucket[]).map((w) => (
-                <button
-                  key={w}
-                  className={weather === w ? 'is-on' : ''}
-                  onClick={() => setWeather(w)}
-                >
-                  {w === 'cool' ? (km ? 'ត្រជាក់' : 'Cool') : w === 'warm' ? (km ? 'ធម្មតា' : 'Warm') : (km ? 'ក្តៅ' : 'Hot')}
-                </button>
-              ))}
-            </div>
-            <div className="decide-env-group" role="group" aria-label={km ? 'ភ្លៀង' : 'Rain'}>
-              {(['dry', 'showers', 'rain'] as RainBucket[]).map((r) => (
-                <button key={r} className={rain === r ? 'is-on' : ''} onClick={() => setRain(r)}>
-                  {r === 'dry' ? (km ? 'មិនភ្លៀង' : 'Dry') : r === 'showers' ? (km ? 'ភ្លៀងតិច' : 'Showers') : (km ? 'ភ្លៀង' : 'Rain')}
-                </button>
-              ))}
-            </div>
+            {dims.includes('weather') && (
+              <div className="decide-env-group" role="group" aria-label={km ? 'អាកាសធាតុ' : 'Weather'}>
+                {(['cool', 'warm', 'hot'] as WeatherBucket[]).map((w) => (
+                  <button
+                    key={w}
+                    className={weather === w ? 'is-on' : ''}
+                    onClick={() => setWeather(w)}
+                  >
+                    {w === 'cool' ? (km ? 'ត្រជាក់' : 'Cool') : w === 'warm' ? (km ? 'ធម្មតា' : 'Warm') : (km ? 'ក្តៅ' : 'Hot')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {dims.includes('rain') && (
+              <div className="decide-env-group" role="group" aria-label={km ? 'ភ្លៀង' : 'Rain'}>
+                {(['dry', 'showers', 'rain'] as RainBucket[]).map((r) => (
+                  <button key={r} className={rain === r ? 'is-on' : ''} onClick={() => setRain(r)}>
+                    {r === 'dry' ? (km ? 'មិនភ្លៀង' : 'Dry') : r === 'showers' ? (km ? 'ភ្លៀងតិច' : 'Showers') : (km ? 'ភ្លៀង' : 'Rain')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {dims.includes('energy') && (
+              <div className="decide-env-group" role="group" aria-label={km ? 'កម្លាំង' : 'Energy'}>
+                {(['low', 'normal', 'high'] as EnergyBucket[]).map((e) => (
+                  <button key={e} className={energy === e ? 'is-on' : ''} onClick={() => setEnergy(e)}>
+                    {e === 'low' ? (km ? 'ហត់' : 'Tired') : e === 'normal' ? (km ? 'ធម្មតា' : 'Normal') : (km ? 'ស្វាហាប់' : 'Fresh')}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <button className="decide-ask" onClick={() => void ask()} disabled={busy}>
-            {busy
-              ? (km ? 'កំពុងគិត…' : 'Thinking…')
-              : wear
-                ? (km ? 'ថ្ងៃនេះគួរស្លៀកអ្វី?' : 'What should I wear today?')
-                : (km ? 'ថ្ងៃនេះគួរញ៉ាំអ្វី?' : 'What should I eat today?')}
+            {busy ? (km ? 'កំពុងគិត…' : 'Thinking…') : (km ? ui.askKm : ui.askEn)}
           </button>
 
           {results?.length === 0 && (
             <p className="decide-empty">
               {km
-                ? 'បន្ថែមម្ហូប ឬសម្លៀកបំពាក់ដែលអ្នកចូលចិត្តជាមុនសិន។'
-                : 'Add a few favourites first — no waiting required.'}
+                ? 'បន្ថែមអ្វីដែលអ្នកធ្វើជាប្រចាំជាមុនសិន។'
+                : 'Add a few of your usual choices first — no waiting required.'}
             </p>
           )}
 
@@ -341,7 +444,7 @@ export function DecideView() {
                       ))}
                     </ul>
                     <button className="decide-chose" onClick={() => void chose(r.key)}>
-                      {wear ? (km ? 'ស្លៀកមួយនេះ' : 'Wore this') : (km ? 'ញ៉ាំមួយនេះ' : 'Ate this')}
+                      {km ? ui.didKm : ui.didEn}
                     </button>
                   </li>
                 ))}
@@ -365,7 +468,7 @@ export function DecideView() {
             <input
               value={draftLabel}
               onChange={(e) => setDraftLabel(e.target.value)}
-              placeholder={wear ? (km ? 'ឈ្មោះសម្លៀកបំពាក់' : 'Garment name') : (km ? 'ឈ្មោះម្ហូប' : 'Dish name')}
+              placeholder={km ? ui.nameKm : ui.nameEn}
               aria-label={km ? 'ឈ្មោះ' : 'Name'}
             />
             {groups.map((g) => (

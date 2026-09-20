@@ -22,47 +22,90 @@ import {
 /** Neutral starting point; reasons push up or down from here. */
 const BASE = 0.5
 
-/** Tag affinities per weather bucket. Empty entries are neutral. */
-const WEATHER_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  hot: {
+/**
+ * All situational weights in one table, keyed `dimension:value`.
+ *
+ * These were four separate maps (weather / rain / slot / day) back when the
+ * dimensions were fixed. Collapsing them means adding a dimension costs a few
+ * rows here and nothing anywhere else — which is what made exercise's "energy"
+ * cheap to add.
+ *
+ * Empty or missing entries are neutral, and a domain simply never supplies the
+ * dimensions it doesn't care about: study reads energy and ignores the sky.
+ *
+ * Every number is a judgement call, not a measurement. The ones encoding local
+ * knowledge are commented, because they are the ones a generic table gets
+ * backwards.
+ */
+const AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
+  'weather:hot': {
     soup: -0.14, curry: -0.10, fried: -0.10, heavy: -0.16, grill: -0.05, meat: -0.05,
     light: +0.15, fruit: +0.14, salad: +0.12, sour: +0.12, steamed: +0.08, veg: +0.08,
     fish: +0.03, porridge: -0.02,
     // Cambodian riders cover up IN the heat: sun cover partly cancels the
     // long-sleeve penalty rather than compounding it.
     'short-sleeve': +0.12, shorts: +0.12, 'sun-protective': +0.10, 'long-sleeve': -0.10,
+    // Midday heat is the real reason not to train outside here.
+    swim: +0.20, indoor: +0.15, gentle: +0.08, stretch: +0.06,
+    outdoor: -0.15, run: -0.12, intense: -0.12, cycle: -0.06,
   },
-  warm: {},
-  cool: {
+  'weather:warm': {},
+  'weather:cool': {
     soup: +0.15, curry: +0.12, heavy: +0.10, porridge: +0.10, fried: +0.04,
     light: -0.06, salad: -0.05, fruit: -0.04, sour: -0.03, veg: -0.03,
     'long-sleeve': +0.12, 'short-sleeve': -0.08, shorts: -0.10,
+    outdoor: +0.12, run: +0.10, cycle: +0.08, intense: +0.05, indoor: -0.05, swim: -0.15,
   },
-}
 
-const RAIN_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  dry: { 'rain-proof': -0.06, 'sun-protective': +0.04, street: +0.04 },
-  showers: { 'rain-proof': +0.10, soup: +0.04, street: -0.08 },
+  'rain:dry': { 'rain-proof': -0.06, 'sun-protective': +0.04, street: +0.04 },
+  'rain:showers': { 'rain-proof': +0.10, soup: +0.04, street: -0.08, outdoor: -0.10, indoor: +0.08 },
   // A stall is a bad idea in real rain, whatever it is selling.
-  rain: {
+  'rain:rain': {
     'rain-proof': +0.22, soup: +0.10, porridge: +0.08, curry: +0.06,
     light: -0.06, grill: -0.08, street: -0.18, 'sun-protective': -0.04,
+    indoor: +0.20, stretch: +0.10, strength: +0.08, outdoor: -0.25, run: -0.15, cycle: -0.15,
   },
-}
 
-const SLOT_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
+  // Energy: exercise and study only. Nothing here touches food or clothes.
+  'energy:low': {
+    gentle: +0.20, stretch: +0.15, walk: +0.12,
+    intense: -0.25, long: -0.15, strength: -0.08,
+    easy: +0.20, review: +0.15, vocabulary: +0.10, listening: +0.08,
+    hard: -0.25, new: -0.15,
+  },
+  'energy:normal': {},
+  'energy:high': {
+    intense: +0.15, strength: +0.10, sport: +0.10, long: +0.08, gentle: -0.08,
+    hard: +0.15, new: +0.12, writing: +0.08, speaking: +0.08,
+  },
+
   // Borbor is the breakfast, so porridge outranks even noodles in the morning.
-  morning: {
+  'slot:morning': {
     porridge: +0.18, noodle: +0.12, soup: +0.10, egg: +0.10, fruit: +0.06, rice: +0.05,
     sweet: +0.04, curry: -0.08, grill: -0.10, heavy: -0.16,
+    run: +0.10, stretch: +0.10, walk: +0.08, gentle: +0.05, intense: -0.05,
+    // A fresh mind takes new and hard material; tired evenings take review.
+    new: +0.12, hard: +0.10, math: +0.08,
   },
-  midday: { rice: +0.10, heavy: +0.05, curry: +0.05, salad: +0.04, fish: +0.03, meat: +0.03 },
-  evening: { grill: +0.08, fruit: +0.06, sweet: +0.05, street: +0.05, porridge: +0.04, heavy: -0.04 },
-}
+  'slot:midday': {
+    rice: +0.10, heavy: +0.05, curry: +0.05, salad: +0.04, fish: +0.03, meat: +0.03,
+    indoor: +0.08, outdoor: -0.10,
+    practice: +0.05,
+  },
+  'slot:evening': {
+    grill: +0.08, fruit: +0.06, sweet: +0.05, street: +0.05, porridge: +0.04, heavy: -0.04,
+    sport: +0.10, walk: +0.08, cycle: +0.06, intense: -0.04,
+    review: +0.12, easy: +0.08, vocabulary: +0.08, hard: -0.10, new: -0.08,
+  },
 
-const DAY_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  work: { formal: +0.15, street: +0.06, casual: -0.08, shorts: -0.12, traditional: -0.15 },
-  rest: { casual: +0.12, traditional: +0.10, shorts: +0.10, street: -0.04, formal: -0.20 },
+  'day:work': {
+    formal: +0.15, street: +0.06, casual: -0.08, shorts: -0.12, traditional: -0.15,
+    short: +0.14, long: -0.16, intense: -0.05,
+  },
+  'day:rest': {
+    casual: +0.12, traditional: +0.10, shorts: +0.10, street: -0.04, formal: -0.20,
+    long: +0.12, sport: +0.10, short: -0.05, new: +0.06,
+  },
 }
 
 function affinity(table: Partial<Record<Tag, number>>, tags: readonly Tag[]): number {
@@ -151,12 +194,19 @@ export function scoreCandidate(state: DecisionState, c: Candidate): Scored {
   score += push(reasons, 'too-recent', recencyDelta(c))
   score += push(reasons, 'tag-fatigue', fatigueDelta(c, state.recentTags))
 
-  const weather = affinity(WEATHER_AFFINITY[state.weather] ?? {}, c.tags)
-    + affinity(RAIN_AFFINITY[state.rain] ?? {}, c.tags)
-  score += push(reasons, weather >= 0 ? 'weather-fit' : 'weather-clash', weather)
+  // Environment (weather + rain) and energy get their own reason buckets:
+  // "suits the weather" would read as nonsense when the driver was tiredness.
+  const env =
+    affinity(AFFINITY[`weather:${state.context.weather}`] ?? {}, c.tags) +
+    affinity(AFFINITY[`rain:${state.context.rain}`] ?? {}, c.tags)
+  score += push(reasons, env >= 0 ? 'weather-fit' : 'weather-clash', env)
 
-  const slot = affinity(SLOT_AFFINITY[state.slot] ?? {}, c.tags)
-    + affinity(DAY_AFFINITY[state.dayType] ?? {}, c.tags)
+  const energy = affinity(AFFINITY[`energy:${state.context.energy}`] ?? {}, c.tags)
+  score += push(reasons, energy >= 0 ? 'energy-fit' : 'energy-clash', energy)
+
+  const slot =
+    affinity(AFFINITY[`slot:${state.slot}`] ?? {}, c.tags) +
+    affinity(AFFINITY[`day:${state.dayType}`] ?? {}, c.tags)
   score += push(reasons, slot >= 0 ? 'slot-fit' : 'slot-clash', slot)
 
   const rating = ratingDelta(c)

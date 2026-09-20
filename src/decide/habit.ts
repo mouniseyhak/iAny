@@ -14,11 +14,14 @@ import {
   type Candidate,
   type DecisionState,
   type Domain,
+  type ContextMap,
+  type EnergyBucket,
   type RainBucket,
   type Tag,
   type WeatherBucket,
   type SeedFrequency,
   CANDIDATE_LIMIT,
+  DOMAIN_CONTEXT,
   calendarDaysBetween,
   sanitizeTags,
   seedGapDays,
@@ -233,7 +236,13 @@ export async function labelsFor(keys: readonly string[]): Promise<Map<string, st
  */
 export async function buildState(
   domain: Domain,
-  env: { tempC?: number; rain?: RainBucket; now?: Date; weather?: WeatherBucket },
+  env: {
+    tempC?: number
+    rain?: RainBucket
+    now?: Date
+    weather?: WeatherBucket
+    energy?: EnergyBucket
+  },
 ): Promise<DecisionState> {
   const db = await getDB()
   const now = env.now ?? new Date()
@@ -282,12 +291,21 @@ export async function buildState(
   const recentTags: Tag[] = []
   for (const row of recent.rows) for (const t of sanitizeTags(domain, row.tags ?? [])) recentTags.push(t)
 
+  // Only the dimensions this domain reads, so a study session never carries a
+  // weather bucket into its cache key and fragments it for nothing.
+  const wanted = DOMAIN_CONTEXT[domain] ?? []
+  const context: ContextMap = {}
+  if (wanted.includes('weather')) {
+    context.weather = env.weather ?? (env.tempC !== undefined ? bucketOf(env.tempC) : 'warm')
+  }
+  if (wanted.includes('rain')) context.rain = env.rain ?? 'dry'
+  if (wanted.includes('energy')) context.energy = env.energy ?? 'normal'
+
   return {
     domain,
     slot: slotFor(now.getHours()),
     dayType: now.getDay() === 0 || now.getDay() === 6 ? 'rest' : 'work',
-    weather: env.weather ?? (env.tempC !== undefined ? bucketOf(env.tempC) : 'warm'),
-    rain: env.rain ?? 'dry',
+    context,
     historyCount: total.rows[0]?.n ?? 0,
     recentTags,
     candidates,

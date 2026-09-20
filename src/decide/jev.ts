@@ -104,10 +104,24 @@ export function describeShape(raw: unknown): string {
   return `object{${keys.slice(0, 12).join(',')}${keys.length > 12 ? ',…' : ''}}`
 }
 
-const WEATHER_TEXT: Record<string, string> = {
-  hot: 'hot (above 32C)',
-  warm: 'warm (26-32C)',
-  cool: 'cool (below 26C)',
+/** Context values rendered for the model, one phrase per dimension value. */
+const CONTEXT_TEXT: Record<string, string> = {
+  'weather:hot': 'the weather is hot, above 32C',
+  'weather:warm': 'the weather is warm, 26-32C',
+  'weather:cool': 'the weather is cool, below 26C',
+  'rain:dry': 'it is dry',
+  'rain:showers': 'there are showers',
+  'rain:rain': 'it is raining',
+  'energy:low': 'they are tired and low on energy',
+  'energy:normal': 'their energy is normal',
+  'energy:high': 'they feel energetic',
+}
+
+const VERBS: Record<string, string> = {
+  meal: 'eat',
+  outfit: 'wear',
+  exercise: 'do for exercise',
+  study: 'study',
 }
 
 const AGO_TEXT: Record<string, string> = {
@@ -133,18 +147,24 @@ function describeCandidate(c: Candidate): string {
  * code path here that can emit user-authored text.
  */
 export function describeState(state: DecisionState): string {
-  const what = state.domain === 'meal' ? 'eat' : 'wear'
+  const what = VERBS[state.domain] ?? 'choose'
   const depth = state.historyCount < 10
     ? 'Their history is short, so habit signals are weak.'
     : `They have ${state.historyCount} past entries.`
   const recent = state.recentTags.length
     ? ` Recent choices were mostly: ${[...new Set(state.recentTags)].join(', ')}.`
     : ''
+  // Only the dimensions this domain supplied — study never mentions weather.
+  const ctx = Object.entries(state.context)
+    .filter(([, v]) => v)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => CONTEXT_TEXT[`${k}:${v}`] ?? `${k} is ${v}`)
+    .join(', ')
+  const situation = ctx ? ` Right now ${ctx}.` : ''
   return (
     `A person in Cambodia is deciding what to ${what} for the ${state.slot} ` +
-    `of a ${state.dayType} day. The weather is ${WEATHER_TEXT[state.weather] ?? state.weather} ` +
-    `and it is ${state.rain}. ${depth}${recent} ` +
-    `Prefer variety over repetition, and comfort appropriate to the weather.`
+    `of a ${state.dayType} day.${situation} ${depth}${recent} ` +
+    `Prefer variety over repetition, and a choice that suits the situation.`
   )
 }
 
@@ -161,17 +181,19 @@ export function buildQuestions(state: DecisionState): Record<string, JevQuestion
     const alias = toAlias.get(c.key)
     if (c.available && alias) criteria[alias] = describeCandidate(c)
   }
-  const verb = state.domain === 'meal' ? 'eat' : 'wear'
+  const verb = VERBS[state.domain] ?? 'choose'
   return {
     pick: {
       type: 'choice',
       instructions: `Which option should the person ${verb} right now?`,
       criteria,
     },
-    heaviness: {
+    // "How heavy, given the weather" is nonsense for a study session. The
+    // question is really about effort, which every domain has.
+    effort: {
       type: 'score',
-      instructions: 'How heavy should the choice be, given the weather and time of day?',
-      criteria: ['Light', 'Moderate', 'Heavy'],
+      instructions: 'How demanding should the choice be, given the situation and time of day?',
+      criteria: ['Easy', 'Moderate', 'Demanding'],
     },
     needs_variety: {
       type: 'noul',

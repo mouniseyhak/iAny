@@ -3118,7 +3118,7 @@ progress {
    be argued with. Mobile-first: this is used one-handed, at a food stall. */
 .decide { display: flex; flex-direction: column; gap: 0.85rem; }
 
-.decide-domains { display: flex; gap: 0.5rem; }
+.decide-domains { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 .decide-domain {
   flex: 1; padding: 0.8rem 0.5rem; border-radius: 0.8rem;
   border: 1px solid var(--border, #cbd5e1); background: transparent;
