@@ -19,6 +19,7 @@ import {
   seedCandidate,
   seedGapDays,
   stateKey,
+  DOMAIN_CONTEXT,
   weatherBucket,
 } from './state'
 import { isAmbiguous, localConfidence, rankLocal, scoreCandidate } from './suggest'
@@ -155,12 +156,12 @@ ok('protein is a real variety axis',
 ok('sun cover offsets long sleeves in heat',
    scoreOf(state({ domain: 'outfit', weather: 'hot' }), cand('a', ['long-sleeve', 'sun-protective'])) >
    scoreOf(state({ domain: 'outfit', weather: 'hot' }), cand('b', ['long-sleeve'])))
-ok('traditional dress belongs to rest days',
-   scoreOf(state({ domain: 'outfit', dayType: 'rest' }), cand('a', ['traditional'])) >
-   scoreOf(state({ domain: 'outfit', dayType: 'work' }), cand('a', ['traditional'])))
+ok('traditional dress belongs to ceremonies, not the office',
+   scoreOf(state({ domain: 'outfit', context: { occasion: 'ceremony' } }), cand('a', ['traditional'])) >
+   scoreOf(state({ domain: 'outfit', context: { occasion: 'work' } }), cand('a', ['traditional'])))
 ok('shorts are not for the office',
-   scoreOf(state({ domain: 'outfit', dayType: 'work' }), cand('a', ['shorts'])) <
-   scoreOf(state({ domain: 'outfit', dayType: 'work' }), cand('b', ['formal'])))
+   scoreOf(state({ domain: 'outfit', context: { occasion: 'work' } }), cand('a', ['shorts'])) <
+   scoreOf(state({ domain: 'outfit', context: { occasion: 'work' } }), cand('b', ['formal'])))
 ok('every meal tag has a weight or is deliberately neutral',
    sanitizeTags('meal', ['soup','porridge','rice','noodle','grill','fried','steamed','curry',
      'salad','fish','meat','egg','veg','spicy','sour','sweet','fruit','light','heavy','street']).length === 20)
@@ -219,6 +220,10 @@ ok('study cache key carries no weather',
    !stateKey(st({ candidates: [cand('a', ['review'])] })).includes('weather'))
 ok('study request never mentions weather',
    !describeState(st()).toLowerCase().includes('weather'))
+ok('meal requests speak in meals, not clock slots',
+   describeState(state({ slot: 'evening', candidates: [cand('a', ['rice'])] })).includes('dinner'))
+ok('non-meal requests keep the clock slot',
+   describeState(state({ domain: 'outfit', slot: 'evening', context: { occasion: 'work' } })).includes('evening'))
 ok('meal and study in the same situation stay distinct keys',
    stateKey(st({ candidates: [cand('a', ['review'])] })) !==
    stateKey(state({ domain: 'meal', context: { energy: 'normal' }, candidates: [cand('a', ['review'] as unknown as string[] as Tag[])] })))
@@ -226,10 +231,25 @@ ok('meal and study in the same situation stay distinct keys',
 console.log('\nslot and day type')
 ok('morning prefers noodle over heavy',
    scoreOf(morning, cand('a', ['noodle'])) > scoreOf(morning, cand('b', ['heavy'])))
-const workday = state({ domain: 'outfit', dayType: 'work' })
-const restday = state({ domain: 'outfit', dayType: 'rest' })
-ok('work day prefers formal', scoreOf(workday, cand('a', ['formal'])) > scoreOf(workday, cand('b', ['casual'])))
-ok('rest day prefers casual', scoreOf(restday, cand('a', ['casual'])) > scoreOf(restday, cand('b', ['formal'])))
+// Outfit style hangs off the OCCASION now, not the day type — a work-day
+// wedding must not double-count.
+const officeDay = state({ domain: 'outfit', context: { occasion: 'work' } })
+const casualDay = state({ domain: 'outfit', context: { occasion: 'casual' } })
+const pagodaDay = state({ domain: 'outfit', context: { occasion: 'ceremony' } })
+const weddingDay = state({ domain: 'outfit', context: { occasion: 'wedding' } })
+ok('work occasion prefers formal', scoreOf(officeDay, cand('a', ['formal'])) > scoreOf(officeDay, cand('b', ['casual'])))
+ok('casual occasion prefers casual', scoreOf(casualDay, cand('a', ['casual'])) > scoreOf(casualDay, cand('b', ['formal'])))
+ok('wedding calls for traditional dress',
+   scoreOf(weddingDay, cand('a', ['traditional'])) > scoreOf(weddingDay, cand('b', ['casual'])))
+ok('ceremony buries shorts',
+   scoreOf(pagodaDay, cand('a', ['shorts', 'casual'])) < scoreOf(pagodaDay, cand('b', ['long-sleeve', 'formal'])))
+ok('occasion is cited, not blamed on the clock',
+   scoreCandidate(weddingDay, cand('a', ['shorts'])).reasons.some((r) => r.code === 'occasion-clash'))
+ok('day type no longer moves outfit style',
+   scoreOf(state({ domain: 'outfit', dayType: 'work', context: {} }), cand('a', ['formal'])) ===
+   scoreOf(state({ domain: 'outfit', dayType: 'rest', context: {} }), cand('a', ['formal'])))
+ok('occasion is outfit-only context', !DOMAIN_CONTEXT.meal.includes('occasion') &&
+   DOMAIN_CONTEXT.outfit.includes('occasion'))
 
 console.log('\navailability (the laundry rule)')
 const inWash = scoreCandidate(state({ domain: 'outfit' }), cand('a', ['formal'], { available: false }))
@@ -362,7 +382,8 @@ const remoteState = state({ candidates: [
 ] })
 const described = describeState(remoteState)
 ok('no Khmer script in the request', !/[ក-៿]/.test(described))
-ok('describes the situation', described.includes('midday') && described.includes('work'))
+ok('describes the situation as a meal, not a clock slot',
+   described.includes('lunch') && described.includes('work'))
 const qs = buildQuestions(remoteState)
 const pickQ = qs['pick'] as { type: string; criteria: Record<string, string> }
 ok('choice covers available candidates only',

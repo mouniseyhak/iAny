@@ -115,6 +115,10 @@ const CONTEXT_TEXT: Record<string, string> = {
   'energy:low': 'they are tired and low on energy',
   'energy:normal': 'their energy is normal',
   'energy:high': 'they feel energetic',
+  'occasion:work': 'they are dressing for work',
+  'occasion:casual': 'it is an ordinary casual day',
+  'occasion:ceremony': 'they are attending a ceremony at the pagoda',
+  'occasion:wedding': 'they are attending a wedding',
 }
 
 const VERBS: Record<string, string> = {
@@ -146,6 +150,13 @@ function describeCandidate(c: Candidate): string {
  * The situation, as a compact sentence. Built only from enums — there is no
  * code path here that can emit user-authored text.
  */
+/** For meals the slot IS the meal, and the model should hear it that way. */
+const MEAL_SLOT_TEXT: Record<string, string> = {
+  morning: 'breakfast',
+  midday: 'lunch',
+  evening: 'dinner',
+}
+
 export function describeState(state: DecisionState): string {
   const what = VERBS[state.domain] ?? 'choose'
   const depth = state.historyCount < 10
@@ -161,8 +172,9 @@ export function describeState(state: DecisionState): string {
     .map(([k, v]) => CONTEXT_TEXT[`${k}:${v}`] ?? `${k} is ${v}`)
     .join(', ')
   const situation = ctx ? ` Right now ${ctx}.` : ''
+  const when = state.domain === 'meal' ? (MEAL_SLOT_TEXT[state.slot] ?? state.slot) : state.slot
   return (
-    `A person in Cambodia is deciding what to ${what} for the ${state.slot} ` +
+    `A person in Cambodia is deciding what to ${what} for the ${when} ` +
     `of a ${state.dayType} day.${situation} ${depth}${recent} ` +
     `Prefer variety over repetition, and a choice that suits the situation.`
   )

@@ -3,14 +3,17 @@ import { useI18n } from '../i18n'
 import {
   type Domain,
   type EnergyBucket,
+  type OccasionBucket,
   type RainBucket,
   type ReasonCode,
+  type Slot,
   type Scored,
   type SeedFrequency,
   type Tag,
   type WeatherBucket,
   DOMAIN_CONTEXT,
   DOMAINS,
+  slotFor,
 } from '../decide/state'
 import {
   type ItemSummary,
@@ -92,6 +95,8 @@ const REASONS: Record<ReasonCode, Phrase & Partial<Record<Domain, Phrase>>> = {
   'weather-clash': { km: 'មិនសូវសមនឹងអាកាសធាតុ', en: 'against the weather' },
   'energy-fit': { km: 'សមនឹងកម្លាំងឥឡូវ', en: 'matches your energy' },
   'energy-clash': { km: 'ធ្ងន់ពេកសម្រាប់ឥឡូវ', en: 'too demanding right now' },
+  'occasion-fit': { km: 'សមនឹងឱកាស', en: 'right for the occasion' },
+  'occasion-clash': { km: 'មិនសមនឹងឱកាស', en: 'wrong for the occasion' },
   'slot-fit': { km: 'សមនឹងពេលវេលា', en: 'suits the time of day' },
   'slot-clash': { km: 'មិនសមនឹងពេលវេលា', en: 'wrong time of day' },
   liked: { km: 'អ្នកចូលចិត្ត', en: 'you like it' },
@@ -260,6 +265,13 @@ export function DecideView() {
   const [weather, setWeather] = useState<WeatherBucket>('warm')
   const [rain, setRain] = useState<RainBucket>('dry')
   const [energy, setEnergy] = useState<EnergyBucket>('normal')
+  // Which meal is being planned. Defaults to the clock but stays overridable,
+  // so "what's for dinner?" can be asked at three in the afternoon.
+  const [mealSlot, setMealSlot] = useState<Slot>(() => slotFor(new Date().getHours()))
+  const [occasion, setOccasion] = useState<OccasionBucket>(() => {
+    const d = new Date().getDay()
+    return d === 0 || d === 6 ? 'casual' : 'work'
+  })
 
   const [draftLabel, setDraftLabel] = useState('')
   const [draftTags, setDraftTags] = useState<Tag[]>([])
@@ -305,7 +317,13 @@ export function DecideView() {
     setBusy(true)
     setError('')
     try {
-      const state = await buildState(domain, { weather, rain, energy })
+      const state = await buildState(domain, {
+        weather,
+        rain,
+        energy,
+        occasion,
+        slot: domain === 'meal' ? mealSlot : undefined,
+      })
       if (state.candidates.length === 0) {
         setResults([])
         setTab('items')
@@ -396,6 +414,24 @@ export function DecideView() {
       {tab === 'ask' && (
         <section className="decide-panel">
           <div className="decide-env">
+            {domain === 'meal' && (
+              <div className="decide-env-group" role="group" aria-label={km ? 'ពេលអាហារ' : 'Meal'}>
+                {(['morning', 'midday', 'evening'] as Slot[]).map((sl) => (
+                  <button key={sl} className={mealSlot === sl ? 'is-on' : ''} onClick={() => setMealSlot(sl)}>
+                    {sl === 'morning' ? (km ? 'អាហារព្រឹក' : 'Breakfast') : sl === 'midday' ? (km ? 'អាហារថ្ងៃត្រង់' : 'Lunch') : (km ? 'អាហារល្ងាច' : 'Dinner')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {dims.includes('occasion') && (
+              <div className="decide-env-group" role="group" aria-label={km ? 'ឱកាស' : 'Occasion'}>
+                {(['work', 'casual', 'ceremony', 'wedding'] as OccasionBucket[]).map((o) => (
+                  <button key={o} className={occasion === o ? 'is-on' : ''} onClick={() => setOccasion(o)}>
+                    {o === 'work' ? (km ? 'ធ្វើការ' : 'Work') : o === 'casual' ? (km ? 'ធម្មតា' : 'Casual') : o === 'ceremony' ? (km ? 'បុណ្យ/វត្ត' : 'Ceremony') : (km ? 'អាពាហ៍ពិពាហ៍' : 'Wedding')}
+                  </button>
+                ))}
+              </div>
+            )}
             {dims.includes('weather') && (
               <div className="decide-env-group" role="group" aria-label={km ? 'អាកាសធាតុ' : 'Weather'}>
                 {(['cool', 'warm', 'hot'] as WeatherBucket[]).map((w) => (

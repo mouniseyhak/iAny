@@ -16,7 +16,9 @@ import {
   type Domain,
   type ContextMap,
   type EnergyBucket,
+  type OccasionBucket,
   type RainBucket,
+  type Slot,
   type Tag,
   type WeatherBucket,
   type SeedFrequency,
@@ -254,6 +256,10 @@ export async function buildState(
     now?: Date
     weather?: WeatherBucket
     energy?: EnergyBucket
+    /** Which meal is being planned — lets "what's for dinner?" be asked at
+     *  3pm instead of letting the clock decide. Defaults to the clock. */
+    slot?: Slot
+    occasion?: OccasionBucket
   },
 ): Promise<DecisionState> {
   const db = await getDB()
@@ -312,10 +318,15 @@ export async function buildState(
   }
   if (wanted.includes('rain')) context.rain = env.rain ?? 'dry'
   if (wanted.includes('energy')) context.energy = env.energy ?? 'normal'
+  if (wanted.includes('occasion')) {
+    // Default follows the calendar: weekdays dress for work, weekends casual.
+    const rest = now.getDay() === 0 || now.getDay() === 6
+    context.occasion = env.occasion ?? (rest ? 'casual' : 'work')
+  }
 
   return {
     domain,
-    slot: slotFor(now.getHours()),
+    slot: env.slot ?? slotFor(now.getHours()),
     dayType: now.getDay() === 0 || now.getDay() === 6 ? 'rest' : 'work',
     context,
     historyCount: total.rows[0]?.n ?? 0,

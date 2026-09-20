@@ -37,6 +37,13 @@ export type RainBucket = 'dry' | 'showers' | 'rain'
 export type EnergyBucket = 'low' | 'normal' | 'high'
 
 /**
+ * What the clothes are FOR. In Cambodia this is the biggest dressing decision
+ * there is — a wedding or a pagoda day rewrites the rules that work/rest day
+ * expresses only weakly. Outfit-only.
+ */
+export type OccasionBucket = 'work' | 'casual' | 'ceremony' | 'wedding'
+
+/**
  * Situational dimensions, as an open map rather than fixed fields.
  *
  * Weather and rain were hardcoded when meals and outfits were the only
@@ -46,13 +53,13 @@ export type EnergyBucket = 'low' | 'normal' | 'high'
  * supply only what its weights actually read, and `stateKey` stays
  * deterministic because the entries are sorted.
  */
-export type ContextDim = 'weather' | 'rain' | 'energy'
+export type ContextDim = 'weather' | 'rain' | 'energy' | 'occasion'
 export type ContextMap = Partial<Record<ContextDim, string>>
 
 /** Which dimensions a domain actually asks about. */
 export const DOMAIN_CONTEXT: Record<Domain, ContextDim[]> = {
   meal: ['weather', 'rain'],
-  outfit: ['weather', 'rain'],
+  outfit: ['weather', 'rain', 'occasion'],
   exercise: ['weather', 'rain', 'energy'],
   // Study is indoors and indifferent to the sky; only the tank matters.
   study: ['energy'],
@@ -172,6 +179,8 @@ export type ReasonCode =
   | 'weather-clash'
   | 'energy-fit'     // gentle when you're spent
   | 'energy-clash'   // too hard for what's left in the tank
+  | 'occasion-fit'   // traditional dress at a wedding
+  | 'occasion-clash' // shorts at the pagoda
   | 'slot-fit'
   | 'slot-clash'
   | 'liked'

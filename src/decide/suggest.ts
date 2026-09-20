@@ -98,13 +98,28 @@ const AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
     review: +0.12, easy: +0.08, vocabulary: +0.08, hard: -0.10, new: -0.08,
   },
 
+  // Outfit style lives on the OCCASION, not the day type — otherwise a
+  // work-day wedding would double-count and the pagoda would lose to the
+  // office. Day type keeps only what is genuinely about the day's rhythm.
   'day:work': {
-    formal: +0.15, street: +0.06, casual: -0.08, shorts: -0.12, traditional: -0.15,
+    street: +0.06,
     short: +0.14, long: -0.16, intense: -0.05,
   },
   'day:rest': {
-    casual: +0.12, traditional: +0.10, shorts: +0.10, street: -0.04, formal: -0.20,
+    street: -0.04,
     long: +0.12, sport: +0.10, short: -0.05, new: +0.06,
+  },
+
+  'occasion:work': { formal: +0.15, casual: -0.08, shorts: -0.12, traditional: -0.10 },
+  'occasion:casual': { casual: +0.12, shorts: +0.08, formal: -0.15, traditional: -0.05 },
+  // Pagoda and ceremony: covered and respectful. Shorts are simply wrong.
+  'occasion:ceremony': {
+    traditional: +0.25, formal: +0.10, 'long-sleeve': +0.05,
+    casual: -0.10, shorts: -0.30,
+  },
+  'occasion:wedding': {
+    traditional: +0.30, formal: +0.20,
+    casual: -0.20, shorts: -0.35, 'rain-proof': -0.05,
   },
 }
 
@@ -203,6 +218,9 @@ export function scoreCandidate(state: DecisionState, c: Candidate): Scored {
 
   const energy = affinity(AFFINITY[`energy:${state.context.energy}`] ?? {}, c.tags)
   score += push(reasons, energy >= 0 ? 'energy-fit' : 'energy-clash', energy)
+
+  const occasion = affinity(AFFINITY[`occasion:${state.context.occasion}`] ?? {}, c.tags)
+  score += push(reasons, occasion >= 0 ? 'occasion-fit' : 'occasion-clash', occasion)
 
   const slot =
     affinity(AFFINITY[`slot:${state.slot}`] ?? {}, c.tags) +
