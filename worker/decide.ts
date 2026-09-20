@@ -22,6 +22,8 @@
  * a sentence built from enums; see src/decide/state.ts for the boundary.
  */
 
+import { describeShape, normalizeJevResponse } from '../src/decide/jev'
+
 export interface DecideEnv {
   /** Workers AI binding (wrangler.jsonc `"ai": { "binding": "AI" }`). */
   AI?: { run: (model: string, input: unknown) => Promise<unknown> }
@@ -115,15 +117,22 @@ export async function handleDecide(request: Request, env: DecideEnv): Promise<Re
     return json({ error: 'model-failed', detail: String(err) }, 502)
   }
 
-  // Cache only a well-formed answer: storing a malformed one would serve the
-  // failure to every other device that lands on this key for a day.
-  const ok = !!answer && typeof answer === 'object' && 'answers' in (answer as object)
-  if (ok && env.DECIDE_CACHE) {
-    await env.DECIDE_CACHE.put(cacheKey, JSON.stringify(answer), {
+  // Workers AI may wrap the model's output; find the answer inside whatever
+  // envelope it came in rather than demanding one exact shape.
+  const normalized = normalizeJevResponse(answer)
+  if (!normalized) {
+    // Name what DID arrive — "model-shape" alone gave nothing to act on.
+    return json({ error: 'model-shape', detail: describeShape(answer) }, 502)
+  }
+
+  // Cache the NORMALIZED form, so a cache hit and a fresh call are
+  // indistinguishable to the client. Never cache a malformed answer: it would
+  // serve the failure to every device landing on this key for a day.
+  if (env.DECIDE_CACHE) {
+    await env.DECIDE_CACHE.put(cacheKey, JSON.stringify(normalized), {
       expirationTtl: CACHE_TTL_SECONDS,
     })
   }
-  if (!ok) return json({ error: 'model-shape' }, 502)
 
-  return json(answer, 200, { 'x-decide-source': 'model' })
+  return json(normalized, 200, { 'x-decide-source': 'model' })
 }

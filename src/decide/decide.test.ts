@@ -19,7 +19,7 @@ import {
 } from './state'
 import { isAmbiguous, localConfidence, rankLocal, scoreCandidate } from './suggest'
 import { cosineDistance, normalize, updateCentroid, verdictFor } from './match'
-import { JevScorer, buildQuestions, describeState, readRanking, shouldConsultRemote } from './jev'
+import { JevScorer, buildQuestions, describeShape, describeState, normalizeJevResponse, readRanking, shouldConsultRemote } from './jev'
 
 let pass = 0; const fails: string[] = []
 const ok = (n: string, c: boolean) => { c ? (pass++, console.log('  ✓', n)) : (fails.push(n), console.log('  ✗', n)) }
@@ -300,6 +300,25 @@ ok('alias order follows the signature, not the id',
    // different local ids, same meaning. That is what makes the cache portable.
    readRanking(deviceA, cached)[0]!.key === '11111111-aaaa' &&
    forB[0]!.key === '99999999-zzzz')
+
+console.log('\nresponse envelopes (a working model must not look broken)')
+const bare = { model: 'jev-1.13.0', answers: { pick: { type: 'choice' } } }
+ok('direct shape passes through', normalizeJevResponse(bare) === bare)
+ok('unwraps a REST result envelope',
+   normalizeJevResponse({ success: true, errors: [], result: bare })?.answers === bare.answers)
+ok('unwraps a response envelope', normalizeJevResponse({ response: bare })?.answers === bare.answers)
+ok('unwraps two layers', normalizeJevResponse({ result: { data: bare } })?.answers === bare.answers)
+ok('genuinely missing answers is still null',
+   normalizeJevResponse({ success: false, errors: ['nope'] }) === null)
+ok('non-objects are null', normalizeJevResponse('hello') === null && normalizeJevResponse(null) === null)
+ok('a self-referencing envelope terminates', (() => {
+  const loop: Record<string, unknown> = {}; loop['result'] = loop
+  return normalizeJevResponse(loop) === null
+})())
+ok('shape describes keys, never values',
+   describeShape({ success: true, errors: [], result: {} }) === 'object{success,errors,result}')
+ok('shape handles arrays and scalars',
+   describeShape([1, 2, 3]) === 'array(3)' && describeShape(null) === 'null')
 
 console.log('\nwhen to spend a remote call')
 const deep = state({ historyCount: 60, candidates: [

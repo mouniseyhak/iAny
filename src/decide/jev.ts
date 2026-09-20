@@ -68,6 +68,41 @@ export interface JevResponse {
   }>
 }
 
+/**
+ * Finds the model's answer inside whatever envelope it arrived in.
+ *
+ * Workers AI hands some models' output back directly and wraps others (the
+ * REST shape is `{ result, success, errors }`). Asserting one exact shape made
+ * a working model look like a failure, so instead we walk a few known wrapper
+ * keys looking for `answers`. Returns null if it genuinely isn't there.
+ */
+export function normalizeJevResponse(raw: unknown): JevResponse | null {
+  let node: unknown = raw
+  for (let depth = 0; depth < 4; depth++) {
+    if (!node || typeof node !== 'object') return null
+    const obj = node as Record<string, unknown>
+    const answers = obj['answers']
+    if (answers && typeof answers === 'object') return node as JevResponse
+    const next = obj['result'] ?? obj['response'] ?? obj['output'] ?? obj['data']
+    if (!next || next === node) return null
+    node = next
+  }
+  return null
+}
+
+/**
+ * The shape of an unexpected payload, for an error a human can act on.
+ * Keys only — never values, which could carry content we shouldn't log.
+ */
+export function describeShape(raw: unknown): string {
+  if (raw === null) return 'null'
+  if (raw === undefined) return 'undefined'
+  if (Array.isArray(raw)) return `array(${raw.length})`
+  if (typeof raw !== 'object') return typeof raw
+  const keys = Object.keys(raw as object)
+  return `object{${keys.slice(0, 12).join(',')}${keys.length > 12 ? ',…' : ''}}`
+}
+
 const WEATHER_TEXT: Record<string, string> = {
   hot: 'hot (above 32C)',
   warm: 'warm (26-32C)',
