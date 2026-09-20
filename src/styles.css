@@ -3111,3 +3111,94 @@ progress {
 .garden-chain-sign {
   display: block; text-align: center; text-decoration: none; margin-top: 10px;
 }
+
+/* ── Decide (/decide) ─────────────────────────────────────────────────────
+   "What should I eat / wear today?" Every answer shows its score AND the
+   reasons behind it — a bare number would be an oracle, and an oracle can't
+   be argued with. Mobile-first: this is used one-handed, at a food stall. */
+.decide { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.decide-domains { display: flex; gap: 0.5rem; }
+.decide-domain {
+  flex: 1; padding: 0.8rem 0.5rem; border-radius: 0.8rem;
+  border: 1px solid var(--border, #cbd5e1); background: transparent;
+  font-size: 1rem; font-weight: 600; cursor: pointer; line-height: 1.35;
+}
+.decide-domain.is-on { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
+
+.decide-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.decide-tabs button {
+  padding: 0.45rem 0.9rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border, #cbd5e1); background: transparent; font-size: 0.9rem;
+}
+.decide-tabs button.is-on { background: var(--fg, #0f172a); color: var(--bg, #fff); }
+
+.decide-panel { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.decide-env { display: flex; flex-direction: column; gap: 0.5rem; }
+.decide-env-group { display: flex; gap: 0.4rem; }
+.decide-env-group button {
+  flex: 1; padding: 0.5rem 0.3rem; border-radius: 0.6rem; cursor: pointer;
+  border: 1px solid var(--border, #cbd5e1); background: transparent; font-size: 0.85rem;
+}
+.decide-env-group button.is-on { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
+
+.decide-ask {
+  padding: 1rem; border-radius: 0.9rem; border: none; cursor: pointer;
+  background: var(--accent, #0ea5e9); color: #fff; font-size: 1.05rem; font-weight: 700;
+}
+.decide-ask:disabled { opacity: 0.55; cursor: default; }
+
+.decide-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+.decide-results > li {
+  border: 1px solid var(--border, #cbd5e1); border-radius: 0.8rem; padding: 0.75rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+.decide-results > li.is-top { border-color: var(--accent, #0ea5e9); border-width: 2px; }
+
+.decide-row { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.decide-label { font-size: 1.05rem; font-weight: 600; word-break: break-word; }
+.decide-score { font-variant-numeric: tabular-nums; font-weight: 700; opacity: 0.75; }
+.decide-count, .decide-itemtags { font-size: 0.82rem; opacity: 0.7; margin: 0; }
+
+.decide-bar { height: 6px; border-radius: 999px; background: var(--border, #e2e8f0); overflow: hidden; }
+.decide-bar > i { display: block; height: 100%; background: var(--accent, #0ea5e9); }
+
+.decide-reasons { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; }
+.decide-reasons > li { font-size: 0.8rem; opacity: 0.85; }
+.decide-reasons > li.is-up { color: #15803d; }
+.decide-reasons > li.is-down { color: #b91c1c; }
+
+.decide-chose {
+  align-self: flex-start; padding: 0.4rem 0.85rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--accent, #0ea5e9); background: transparent;
+  color: var(--accent, #0ea5e9); font-size: 0.88rem; font-weight: 600;
+}
+
+.decide-meta, .decide-hint, .decide-empty, .decide-error { font-size: 0.85rem; margin: 0; }
+.decide-meta { opacity: 0.7; }
+.decide-hint, .decide-empty { opacity: 0.8; line-height: 1.6; }
+.decide-error { color: #b91c1c; }
+
+.decide-add { display: flex; flex-direction: column; gap: 0.55rem; }
+.decide-add input {
+  padding: 0.7rem 0.8rem; border-radius: 0.7rem; font-size: 1rem;
+  border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit;
+}
+.decide-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.decide-chips button {
+  padding: 0.35rem 0.7rem; border-radius: 999px; cursor: pointer; font-size: 0.85rem;
+  border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit;
+}
+.decide-chips button.is-on { background: var(--accent, #0ea5e9); color: #fff; border-color: transparent; }
+
+.decide-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.decide-items > li {
+  border: 1px solid var(--border, #cbd5e1); border-radius: 0.7rem; padding: 0.6rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.decide-itemactions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.decide-itemactions button {
+  padding: 0.3rem 0.65rem; border-radius: 999px; cursor: pointer; font-size: 0.82rem;
+  border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit;
+}

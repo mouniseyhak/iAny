@@ -188,6 +188,7 @@ export default defineConfig({
         cropScan: path.resolve(root, 'crop-scan.html'),
         garden: path.resolve(root, 'garden.html'),
         magic: path.resolve(root, 'magic.html'),
+        decide: path.resolve(root, 'decide.html'),
       },
     },
   },

@@ -29,7 +29,7 @@ import {
   agoBucket,
   stateKey,
 } from './state'
-import { rankLocal } from './suggest'
+import { isAmbiguous, rankLocal } from './suggest'
 
 /** Mirrors the `typesafe/jev` request schema. */
 export interface JevChoiceQuestion {
@@ -173,12 +173,30 @@ export function readRanking(state: DecisionState, resp: JevResponse): Scored[] {
 }
 
 /**
+ * Is a remote call worth making?
+ *
+ * Yes when the local scorer is under-confident (little history, or a thin
+ * candidate list) or when its top two are effectively tied. No otherwise —
+ * a settled habit with a clear winner doesn't need a second opinion, and not
+ * asking keeps the answer instant and free.
+ */
+export function shouldConsultRemote(state: DecisionState, local: readonly Scored[]): boolean {
+  // Nothing to choose between — a second opinion cannot change the answer.
+  if (state.candidates.filter((c) => c.available).length < 2) return false
+  const confidence = local[0]?.confidence ?? 0
+  return confidence < MIN_CONFIDENCE || isAmbiguous(local)
+}
+
+/**
  * Remote scorer with an unconditional local fallback.
  *
  * Falls back on: offline, HTTP error, empty candidate set, or a confidence
  * below the floor. The caller cannot end up with no answer.
  */
 export class JevScorer implements Scorer {
+  /** Which scorer actually produced the last result, for the UI to show. */
+  lastSource: 'local' | 'remote' = 'local'
+
   constructor(
     private endpoint = '/api/decide',
     private fetchImpl: typeof fetch = globalThis.fetch?.bind(globalThis),
@@ -186,7 +204,13 @@ export class JevScorer implements Scorer {
 
   async rank(state: DecisionState): Promise<Scored[]> {
     const local = rankLocal(state)
+    this.lastSource = 'local'
     if (state.candidates.length === 0 || !this.fetchImpl) return local
+    // Spend a call only when the cheap scorer is genuinely unsure — either it
+    // lacks the history to stand on, or its top two are a coin toss. A user
+    // with deep history and a clear winner gets an instant offline answer and
+    // costs nothing.
+    if (!shouldConsultRemote(state, local)) return local
     try {
       const res = await this.fetchImpl(this.endpoint, {
         method: 'POST',
@@ -200,6 +224,7 @@ export class JevScorer implements Scorer {
       // Keep the local reasons alongside the remote score: the user still gets
       // a breakdown they can argue with, whichever scorer produced the number.
       const byKey = new Map(local.map((s) => [s.key, s.reasons]))
+      this.lastSource = 'remote'
       return remote.map((s) => ({ ...s, reasons: [...(byKey.get(s.key) ?? []), ...s.reasons] }))
     } catch {
       return local

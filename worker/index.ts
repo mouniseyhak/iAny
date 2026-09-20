@@ -11,6 +11,7 @@
 
 import { serveTrace } from '../trace/worker/handlers'
 import { handleGrove } from '../grove/worker/handlers'
+import { handleDecide } from './decide'
 
 interface Env {
   MODELS: R2Bucket
@@ -20,6 +21,11 @@ interface Env {
   /** Secret for creating/enabling outlets (POST /radio/admin/*). Set via
    *  `wrangler secret put RADIO_ADMIN_TOKEN`. */
   RADIO_ADMIN_TOKEN?: string
+  /** Workers AI — used only by /api/decide (typesafe/jev). Optional: without
+   *  it the Decide page falls back to its on-device scorer. */
+  AI?: { run: (model: string, input: unknown) => Promise<unknown> }
+  /** Shared answer cache for /api/decide. Optional. */
+  DECIDE_CACHE?: KVNamespace
 }
 
 const HF = 'https://huggingface.co'
@@ -177,6 +183,12 @@ export default {
     // storing and serves public read-only feeds (see grove/worker/handlers.ts).
     if (url.pathname === '/api/grove' || url.pathname.startsWith('/api/grove/')) {
       return handleGrove(url, request, env)
+    }
+    // Decide (/decide) — the online half of the everyday-decision engine. The
+    // device only calls this when its own offline scorer is unsure, and treats
+    // any failure here as "use the local answer". See worker/decide.ts.
+    if (url.pathname === '/api/decide') {
+      return handleDecide(request, env)
     }
     // The standalone "Contribute your voice" page (voice.html) is served
     // directly by the asset layer at the clean URL /voice — Cloudflare maps

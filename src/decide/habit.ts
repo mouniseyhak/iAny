@@ -162,6 +162,57 @@ export async function setAvailable(itemId: string, available: boolean): Promise<
   )
 }
 
+export interface ItemSummary {
+  id: string
+  label: string
+  tags: Tag[]
+  rating: number | null
+  available: boolean
+  seedGapDays: number | null
+  timesUsed: number
+}
+
+/** Everything the user has added in a domain, for the manage screen. */
+export async function listItems(domain: Domain): Promise<ItemSummary[]> {
+  const db = await getDB()
+  const res = await db.query<ItemRow>(
+    `SELECT i.id, i.label, i.tags, i.samples, i.rating, i.available, i.seed_gap_days,
+            count(l.id)::int AS times_used,
+            max(l.at)::text  AS last_at
+     FROM habit_items i
+     LEFT JOIN habit_log l ON l.item_id = i.id AND l.deleted_at IS NULL
+     WHERE i.domain = $1 AND i.deleted_at IS NULL
+     GROUP BY i.id
+     ORDER BY i.created_at`,
+    [domain],
+  )
+  return res.rows.map((r) => ({
+    id: r.id,
+    label: r.label,
+    tags: sanitizeTags(domain, r.tags ?? []),
+    rating: r.rating,
+    available: r.available,
+    seedGapDays: r.seed_gap_days,
+    timesUsed: r.times_used,
+  }))
+}
+
+/** Soft delete, so a mistaken removal doesn't destroy the log behind it. */
+export async function removeItem(itemId: string): Promise<void> {
+  const db = await getDB()
+  await db.query(`UPDATE habit_items SET deleted_at = now() WHERE id = $1`, [itemId])
+}
+
+/** How many entries have been logged in a domain — drives the setup prompt. */
+export async function logCount(domain: Domain): Promise<number> {
+  const db = await getDB()
+  const res = await db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM habit_log WHERE domain = $1 AND deleted_at IS NULL`,
+    [domain],
+  )
+  return res.rows[0]?.n ?? 0
+}
+
 /** Resolves opaque candidate keys back to Khmer labels, for rendering. */
 export async function labelsFor(keys: readonly string[]): Promise<Map<string, string>> {
   if (keys.length === 0) return new Map()

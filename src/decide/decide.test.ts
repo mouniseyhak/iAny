@@ -17,9 +17,9 @@ import {
   stateKey,
   weatherBucket,
 } from './state'
-import { localConfidence, rankLocal, scoreCandidate } from './suggest'
+import { isAmbiguous, localConfidence, rankLocal, scoreCandidate } from './suggest'
 import { cosineDistance, normalize, updateCentroid, verdictFor } from './match'
-import { buildQuestions, describeState, readRanking } from './jev'
+import { JevScorer, buildQuestions, describeState, readRanking, shouldConsultRemote } from './jev'
 
 let pass = 0; const fails: string[] = []
 const ok = (n: string, c: boolean) => { c ? (pass++, console.log('  ✓', n)) : (fails.push(n), console.log('  ✗', n)) }
@@ -269,6 +269,49 @@ ok('high variety signal is cited',
    remote[0]!.reasons.some((r) => r.code === 'tag-fatigue'))
 ok('missing answers degrade to 0, not NaN',
    readRanking(remoteState, { answers: {} }).every((r) => r.score === 0 && !Number.isNaN(r.score)))
+
+console.log('\nwhen to spend a remote call')
+const deep = state({ historyCount: 60, candidates: [
+  cand('a', ['rice'], { daysSinceUsed: 20 }), cand('b', ['soup'], { daysSinceUsed: 1 }) ] })
+ok('clear winner with deep history → stay offline',
+   !shouldConsultRemote(deep, rankLocal(deep)))
+const tied = state({ historyCount: 60, candidates: [cand('a', ['rice']), cand('b', ['rice'])] })
+ok('a coin toss is worth asking about', shouldConsultRemote(tied, rankLocal(tied)))
+const thin = state({ historyCount: 2, candidates: [cand('a', ['rice']), cand('b', ['soup'])] })
+ok('low confidence is worth asking about', shouldConsultRemote(thin, rankLocal(thin)))
+ok('one candidate is never worth a call',
+   !shouldConsultRemote(state({ historyCount: 0, candidates: [cand('a', ['rice'])] }),
+                        rankLocal(state({ historyCount: 0, candidates: [cand('a', ['rice'])] }))))
+ok('ambiguity needs two entries', !isAmbiguous(rankLocal(state({ candidates: [cand('a', ['rice'])] }))))
+ok('a wide gap is not ambiguous',
+   !isAmbiguous([{ key: 'a', score: 0.9, confidence: 1, reasons: [] },
+                 { key: 'b', score: 0.2, confidence: 1, reasons: [] }]))
+
+// Offline / server failure must never leave the user with nothing.
+const offlineScorer = new JevScorer('/api/decide', (async () => {
+  throw new Error('offline')
+}) as unknown as typeof fetch)
+const offlineRanked = await offlineScorer.rank(thin)
+ok('network failure still returns a ranking', offlineRanked.length === 2)
+ok('network failure reports local provenance', offlineScorer.lastSource === 'local')
+
+const badStatus = new JevScorer('/api/decide', (async () =>
+  new Response('nope', { status: 503 })) as unknown as typeof fetch)
+ok('server error falls back to local', (await badStatus.rank(thin)).length === 2)
+
+const lowConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
+  answers: { pick: { type: 'choice', confidence: 0.1, probabilities: { a: 0.5, b: 0.5 } } },
+}))) as unknown as typeof fetch)
+await lowConf.rank(thin)
+ok('an under-confident remote answer is discarded', lowConf.lastSource === 'local')
+
+const goodConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
+  answers: { pick: { type: 'choice', confidence: 0.85, probabilities: { a: 0.7, b: 0.3 } } },
+}))) as unknown as typeof fetch)
+const remoteRanked = await goodConf.rank(thin)
+ok('a confident remote answer is used', goodConf.lastSource === 'remote')
+ok('remote answers keep the local reasons for the breakdown',
+   remoteRanked[0]!.key === 'a' && remoteRanked[0]!.score === 0.7)
 
 console.log(`\n${fails.length ? '❌' : '✅'} ${pass} passed, ${fails.length} failed`)
 if (fails.length) throw new Error(fails.join('; '))

@@ -198,6 +198,18 @@ export function rankLocal(state: DecisionState): Scored[] {
     .sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
 }
 
+/**
+ * True when the top two are close enough that the ordering is basically a
+ * coin toss. Together with a low confidence score this is what justifies
+ * spending a remote call: ask the expensive scorer only when the cheap one is
+ * genuinely unsure, not on every tap.
+ */
+export function isAmbiguous(ranked: readonly Scored[], margin = 0.08): boolean {
+  const [first, second] = ranked
+  if (!first || !second) return false
+  return first.score - second.score < margin
+}
+
 /** The always-available implementation of `Scorer`. */
 export class LocalScorer implements Scorer {
   async rank(state: DecisionState): Promise<Scored[]> {

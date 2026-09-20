@@ -30,6 +30,22 @@
       "database_id": "3fd21875-1ed5-438c-b249-83baa9f2ab2c"
     }
   ],
+  // Workers AI — powers POST /api/decide (typesafe/jev structured decisions).
+  // Optional: with no binding the Decide page answers entirely on-device.
+  "ai": {
+    "binding": "AI"
+  },
+  // Shared answer cache for /api/decide. Because the cache key is built from
+  // bucketed enums, different people in the same situation share a key, so one
+  // miss warms the answer for everyone. Create it once:
+  //   npx wrangler kv namespace create DECIDE_CACHE
+  // then paste the returned id below and redeploy.
+  "kv_namespaces": [
+    {
+      "binding": "DECIDE_CACHE",
+      "id": "PLACEHOLDER_RUN_WRANGLER_KV_NAMESPACE_CREATE"
+    }
+  ],
   // Daily purge of news past its 7-day TTL (worker `scheduled` handler).
   "triggers": {
     "crons": ["0 3 * * *"]
