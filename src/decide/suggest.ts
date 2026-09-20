@@ -26,12 +26,12 @@ const BASE = 0.5
 const WEATHER_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
   hot: {
     soup: -0.14, fried: -0.10, heavy: -0.16, grill: -0.05,
-    light: +0.15, salad: +0.12, 'short-sleeve': +0.12, 'long-sleeve': -0.10,
+    light: +0.15, salad: +0.12, fruit: +0.14, 'short-sleeve': +0.12, 'long-sleeve': -0.10,
   },
   warm: {},
   cool: {
     soup: +0.15, heavy: +0.10, fried: +0.04,
-    light: -0.06, salad: -0.05, 'long-sleeve': +0.12, 'short-sleeve': -0.08,
+    light: -0.06, salad: -0.05, fruit: -0.04, 'long-sleeve': +0.12, 'short-sleeve': -0.08,
   },
 }
 
@@ -42,9 +42,9 @@ const RAIN_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
 }
 
 const SLOT_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  morning: { noodle: +0.12, soup: +0.10, rice: +0.05, heavy: -0.16, sweet: +0.04 },
+  morning: { noodle: +0.12, soup: +0.10, rice: +0.05, heavy: -0.16, sweet: +0.04, fruit: +0.06 },
   midday: { rice: +0.10, heavy: +0.05, salad: +0.04 },
-  evening: { grill: +0.08, heavy: -0.04, sweet: +0.05 },
+  evening: { grill: +0.08, heavy: -0.04, sweet: +0.05, fruit: +0.06 },
 }
 
 const DAY_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {

@@ -104,6 +104,16 @@ ok('hot day pushes heavy down', scoreOf(hot, cand('a', ['heavy'])) < scoreOf(hot
 ok('weather clash is cited',
    scoreCandidate(hot, cand('a', ['soup'])).reasons.some((r) => r.code === 'weather-clash'))
 
+ok('fruit is in the meal vocabulary', sanitizeTags('meal', ['fruit']).join() === 'fruit')
+ok('fruit is not an outfit tag', sanitizeTags('outfit', ['fruit']).length === 0)
+ok('hot day favours fruit over fried',
+   scoreOf(hot, cand('a', ['fruit'])) > scoreOf(hot, cand('b', ['fried'])))
+ok('cool day does not favour fruit over soup',
+   scoreOf(cool, cand('a', ['fruit'])) < scoreOf(cool, cand('b', ['soup'])))
+ok('fruit suits morning and evening',
+   scoreOf(state({ slot: 'evening' }), cand('a', ['fruit'])) >
+   scoreOf(state({ slot: 'midday' }), cand('a', ['fruit'])))
+
 const rainy = state({ domain: 'outfit', rain: 'rain' })
 ok('rain prefers rain-proof',
    scoreOf(rainy, cand('a', ['rain-proof'])) > scoreOf(rainy, cand('b', ['light'])))

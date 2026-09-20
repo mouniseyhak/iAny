@@ -36,7 +36,8 @@ export type RainBucket = 'dry' | 'showers' | 'rain'
  * leak free text off-device and blow up the cache key space.
  */
 export const MEAL_TAGS = [
-  'soup', 'grill', 'fried', 'rice', 'noodle', 'salad', 'sweet', 'spicy', 'light', 'heavy',
+  'soup', 'grill', 'fried', 'rice', 'noodle', 'salad', 'fruit', 'sweet', 'spicy',
+  'light', 'heavy',
 ] as const
 
 export const OUTFIT_TAGS = [

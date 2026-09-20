@@ -77,6 +77,7 @@ const TAG_TEXT: Partial<Record<Tag, { km: string; en: string }>> = {
   rice: { km: 'បាយ', en: 'rice' },
   noodle: { km: 'មី/គុយទាវ', en: 'noodles' },
   salad: { km: 'ញាំ/សាឡាត់', en: 'salad' },
+  fruit: { km: 'ផ្លែឈើ', en: 'fruit' },
   sweet: { km: 'ផ្អែម', en: 'sweet' },
   spicy: { km: 'ហឹរ', en: 'spicy' },
   light: { km: 'ស្រាល', en: 'light' },
