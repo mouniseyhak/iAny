@@ -3219,3 +3219,10 @@ progress {
   font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.04em; opacity: 0.55;
 }
+
+/* Inline rename in the item list. */
+.decide-edit {
+  flex: 1; min-width: 0; padding: 0.35rem 0.5rem; border-radius: 0.5rem;
+  font-size: 1rem; border: 1px solid var(--accent, #0ea5e9);
+  background: transparent; color: inherit;
+}

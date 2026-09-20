@@ -21,6 +21,7 @@ import {
   rateItem,
   recordEntry,
   removeItem,
+  renameItem,
   seedItem,
   setAvailable,
 } from '../decide/habit'
@@ -254,6 +255,8 @@ export function DecideView() {
   const [draftLabel, setDraftLabel] = useState('')
   const [draftTags, setDraftTags] = useState<Tag[]>([])
   const [draftFreq, setDraftFreq] = useState<SeedFrequency>('weekly')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editLabel, setEditLabel] = useState('')
 
   const wear = domain === 'outfit'
   const groups = TAG_GROUPS[domain]
@@ -331,6 +334,14 @@ export function DecideView() {
     setDraftLabel('')
     setDraftTags([])
     await refresh()
+  }
+
+  async function saveLabel() {
+    if (editingId && editLabel.trim()) {
+      await renameItem(editingId, editLabel)
+      await refresh()
+    }
+    setEditingId(null)
   }
 
   const toggleTag = (t: Tag) =>
@@ -509,13 +520,39 @@ export function DecideView() {
             {items.map((it) => (
               <li key={it.id}>
                 <div className="decide-row">
-                  <span className="decide-label">{it.label}</span>
+                  {editingId === it.id ? (
+                    <input
+                      className="decide-edit"
+                      value={editLabel}
+                      autoFocus
+                      onChange={(e) => setEditLabel(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void saveLabel()
+                        if (e.key === 'Escape') setEditingId(null)
+                      }}
+                      aria-label={km ? 'កែឈ្មោះ' : 'Edit name'}
+                    />
+                  ) : (
+                    <span className="decide-label">{it.label}</span>
+                  )}
                   <span className="decide-count">
                     {it.timesUsed}× {!it.available && (km ? '· កំពុងបោក' : '· in wash')}
                   </span>
                 </div>
                 <p className="decide-itemtags">{it.tags.map(tagText).join(' · ') || '—'}</p>
                 <div className="decide-itemactions">
+                  {editingId === it.id ? (
+                    <>
+                      <button onClick={() => void saveLabel()} disabled={!editLabel.trim()}>
+                        {km ? 'រក្សាទុក' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditingId(null)}>{km ? 'បោះបង់' : 'Cancel'}</button>
+                    </>
+                  ) : (
+                    <button onClick={() => { setEditingId(it.id); setEditLabel(it.label) }}>
+                      {km ? 'កែឈ្មោះ' : 'Rename'}
+                    </button>
+                  )}
                   <button onClick={() => void rateItem(it.id, 1).then(refresh)}>👍</button>
                   <button onClick={() => void rateItem(it.id, -1).then(refresh)}>👎</button>
                   {wear && (

@@ -147,6 +147,18 @@ export async function recordEntry(
   return id
 }
 
+/** Rename an item. The label is device-local only, so this touches nothing
+ *  else — no cache key, no remote request, no log history. */
+export async function renameItem(itemId: string, label: string): Promise<void> {
+  const trimmed = label.trim()
+  if (!trimmed) return
+  const db = await getDB()
+  await db.query(
+    `UPDATE habit_items SET label = $2, updated_at = now() WHERE id = $1`,
+    [itemId, trimmed],
+  )
+}
+
 /** Thumbs up / down on an item, -1..1. */
 export async function rateItem(itemId: string, rating: number): Promise<void> {
   const db = await getDB()
