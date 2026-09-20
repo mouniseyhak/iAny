@@ -25,31 +25,44 @@ const BASE = 0.5
 /** Tag affinities per weather bucket. Empty entries are neutral. */
 const WEATHER_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
   hot: {
-    soup: -0.14, fried: -0.10, heavy: -0.16, grill: -0.05,
-    light: +0.15, salad: +0.12, fruit: +0.14, 'short-sleeve': +0.12, 'long-sleeve': -0.10,
+    soup: -0.14, curry: -0.10, fried: -0.10, heavy: -0.16, grill: -0.05, meat: -0.05,
+    light: +0.15, fruit: +0.14, salad: +0.12, sour: +0.12, steamed: +0.08, veg: +0.08,
+    fish: +0.03, porridge: -0.02,
+    // Cambodian riders cover up IN the heat: sun cover partly cancels the
+    // long-sleeve penalty rather than compounding it.
+    'short-sleeve': +0.12, shorts: +0.12, 'sun-protective': +0.10, 'long-sleeve': -0.10,
   },
   warm: {},
   cool: {
-    soup: +0.15, heavy: +0.10, fried: +0.04,
-    light: -0.06, salad: -0.05, fruit: -0.04, 'long-sleeve': +0.12, 'short-sleeve': -0.08,
+    soup: +0.15, curry: +0.12, heavy: +0.10, porridge: +0.10, fried: +0.04,
+    light: -0.06, salad: -0.05, fruit: -0.04, sour: -0.03, veg: -0.03,
+    'long-sleeve': +0.12, 'short-sleeve': -0.08, shorts: -0.10,
   },
 }
 
 const RAIN_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  dry: { 'rain-proof': -0.06 },
-  showers: { 'rain-proof': +0.10, soup: +0.04 },
-  rain: { 'rain-proof': +0.22, soup: +0.10, light: -0.06, grill: -0.08 },
+  dry: { 'rain-proof': -0.06, 'sun-protective': +0.04, street: +0.04 },
+  showers: { 'rain-proof': +0.10, soup: +0.04, street: -0.08 },
+  // A stall is a bad idea in real rain, whatever it is selling.
+  rain: {
+    'rain-proof': +0.22, soup: +0.10, porridge: +0.08, curry: +0.06,
+    light: -0.06, grill: -0.08, street: -0.18, 'sun-protective': -0.04,
+  },
 }
 
 const SLOT_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  morning: { noodle: +0.12, soup: +0.10, rice: +0.05, heavy: -0.16, sweet: +0.04, fruit: +0.06 },
-  midday: { rice: +0.10, heavy: +0.05, salad: +0.04 },
-  evening: { grill: +0.08, heavy: -0.04, sweet: +0.05, fruit: +0.06 },
+  // Borbor is the breakfast, so porridge outranks even noodles in the morning.
+  morning: {
+    porridge: +0.18, noodle: +0.12, soup: +0.10, egg: +0.10, fruit: +0.06, rice: +0.05,
+    sweet: +0.04, curry: -0.08, grill: -0.10, heavy: -0.16,
+  },
+  midday: { rice: +0.10, heavy: +0.05, curry: +0.05, salad: +0.04, fish: +0.03, meat: +0.03 },
+  evening: { grill: +0.08, fruit: +0.06, sweet: +0.05, street: +0.05, porridge: +0.04, heavy: -0.04 },
 }
 
 const DAY_AFFINITY: Record<string, Partial<Record<Tag, number>>> = {
-  work: { formal: +0.15, casual: -0.08 },
-  rest: { formal: -0.20, casual: +0.12 },
+  work: { formal: +0.15, street: +0.06, casual: -0.08, shorts: -0.12, traditional: -0.15 },
+  rest: { casual: +0.12, traditional: +0.10, shorts: +0.10, street: -0.04, formal: -0.20 },
 }
 
 function affinity(table: Partial<Record<Tag, number>>, tags: readonly Tag[]): number {

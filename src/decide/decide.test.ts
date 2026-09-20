@@ -98,6 +98,7 @@ ok('never-tried gets a nudge',
 console.log('\nweather')
 const hot = state({ weather: 'hot' })
 const cool = state({ weather: 'cool' })
+const morning = state({ slot: 'morning' })
 ok('hot day prefers salad over soup', scoreOf(hot, cand('a', ['salad'])) > scoreOf(hot, cand('b', ['soup'])))
 ok('cool day prefers soup over salad', scoreOf(cool, cand('a', ['soup'])) > scoreOf(cool, cand('b', ['salad'])))
 ok('hot day pushes heavy down', scoreOf(hot, cand('a', ['heavy'])) < scoreOf(hot, cand('b', ['light'])))
@@ -114,12 +115,46 @@ ok('fruit suits morning and evening',
    scoreOf(state({ slot: 'evening' }), cand('a', ['fruit'])) >
    scoreOf(state({ slot: 'midday' }), cand('a', ['fruit'])))
 
+// Sour soup is a HOT-season dish in Cambodia: 'sour' must offset the generic
+// soup penalty, or samlor machu would be wrongly buried every warm day.
+ok('sour lifts a soup in the heat',
+   scoreOf(hot, cand('a', ['soup', 'sour'])) > scoreOf(hot, cand('b', ['soup'])))
+ok('curry belongs to the cool days',
+   scoreOf(cool, cand('a', ['curry'])) > scoreOf(hot, cand('a', ['curry'])))
+ok('porridge wins the morning',
+   scoreOf(morning, cand('a', ['porridge'])) > scoreOf(morning, cand('b', ['grill'])))
+ok('steamed beats fried in the heat',
+   scoreOf(hot, cand('a', ['steamed'])) > scoreOf(hot, cand('b', ['fried'])))
+ok('rain pushes street food away',
+   scoreOf(state({ rain: 'rain' }), cand('a', ['street'])) <
+   scoreOf(state({ rain: 'dry' }), cand('a', ['street'])))
+ok('protein is a real variety axis',
+   scoreOf(state({ recentTags: ['meat', 'meat', 'meat', 'meat'] as Tag[] }), cand('a', ['meat'])) <
+   scoreOf(state({ recentTags: ['meat', 'meat', 'meat', 'meat'] as Tag[] }), cand('b', ['fish'])))
+
+// Riders here cover up IN the heat. Sun cover must offset the long-sleeve
+// penalty, not compound it, or the app tells people to get sunburnt.
+ok('sun cover offsets long sleeves in heat',
+   scoreOf(state({ domain: 'outfit', weather: 'hot' }), cand('a', ['long-sleeve', 'sun-protective'])) >
+   scoreOf(state({ domain: 'outfit', weather: 'hot' }), cand('b', ['long-sleeve'])))
+ok('traditional dress belongs to rest days',
+   scoreOf(state({ domain: 'outfit', dayType: 'rest' }), cand('a', ['traditional'])) >
+   scoreOf(state({ domain: 'outfit', dayType: 'work' }), cand('a', ['traditional'])))
+ok('shorts are not for the office',
+   scoreOf(state({ domain: 'outfit', dayType: 'work' }), cand('a', ['shorts'])) <
+   scoreOf(state({ domain: 'outfit', dayType: 'work' }), cand('b', ['formal'])))
+ok('every meal tag has a weight or is deliberately neutral',
+   sanitizeTags('meal', ['soup','porridge','rice','noodle','grill','fried','steamed','curry',
+     'salad','fish','meat','egg','veg','spicy','sour','sweet','fruit','light','heavy','street']).length === 20)
+ok('outfit vocabulary is complete',
+   sanitizeTags('outfit', ['long-sleeve','short-sleeve','shorts','formal','casual','traditional',
+     'rain-proof','sun-protective','light','heavy']).length === 10)
+
 const rainy = state({ domain: 'outfit', rain: 'rain' })
 ok('rain prefers rain-proof',
    scoreOf(rainy, cand('a', ['rain-proof'])) > scoreOf(rainy, cand('b', ['light'])))
 
 console.log('\nslot and day type')
-const morning = state({ slot: 'morning' })
 ok('morning prefers noodle over heavy',
    scoreOf(morning, cand('a', ['noodle'])) > scoreOf(morning, cand('b', ['heavy'])))
 const workday = state({ domain: 'outfit', dayType: 'work' })

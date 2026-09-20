@@ -3211,3 +3211,11 @@ progress {
   padding: 0.5rem 0.7rem; border-radius: 0.6rem;
   background: var(--border, #e2e8f0);
 }
+
+/* Grouped tag picker: twenty chips in one row is a wall, grouped they read as
+   a few small decisions. */
+.decide-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.decide-group-label {
+  font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; opacity: 0.55;
+}

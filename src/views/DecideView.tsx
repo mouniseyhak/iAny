@@ -8,8 +8,6 @@ import {
   type SeedFrequency,
   type Tag,
   type WeatherBucket,
-  MEAL_TAGS,
-  OUTFIT_TAGS,
 } from '../decide/state'
 import {
   type ItemSummary,
@@ -72,21 +70,51 @@ const REASONS: Record<ReasonCode, { km: string; en: string; kmWear?: string; enW
 
 const TAG_TEXT: Partial<Record<Tag, { km: string; en: string }>> = {
   soup: { km: 'ស៊ុប', en: 'soup' },
-  grill: { km: 'អាំង', en: 'grilled' },
-  fried: { km: 'ឆា/បំពង', en: 'fried' },
+  porridge: { km: 'បបរ', en: 'porridge' },
   rice: { km: 'បាយ', en: 'rice' },
   noodle: { km: 'មី/គុយទាវ', en: 'noodles' },
+  grill: { km: 'អាំង', en: 'grilled' },
+  fried: { km: 'ឆា/បំពង', en: 'fried' },
+  steamed: { km: 'ចំហុយ', en: 'steamed' },
+  curry: { km: 'ការី', en: 'curry' },
   salad: { km: 'ញាំ/សាឡាត់', en: 'salad' },
-  fruit: { km: 'ផ្លែឈើ', en: 'fruit' },
-  sweet: { km: 'ផ្អែម', en: 'sweet' },
+  fish: { km: 'ត្រី', en: 'fish' },
+  meat: { km: 'សាច់', en: 'meat' },
+  egg: { km: 'ពង', en: 'egg' },
+  veg: { km: 'បន្លែ', en: 'vegetables' },
   spicy: { km: 'ហឹរ', en: 'spicy' },
+  sour: { km: 'ជូរ', en: 'sour' },
+  sweet: { km: 'ផ្អែម', en: 'sweet' },
+  fruit: { km: 'ផ្លែឈើ', en: 'fruit' },
   light: { km: 'ស្រាល', en: 'light' },
   heavy: { km: 'ធ្ងន់', en: 'heavy' },
+  street: { km: 'តាមផ្លូវ', en: 'street food' },
   'long-sleeve': { km: 'ដៃវែង', en: 'long sleeve' },
   'short-sleeve': { km: 'ដៃខ្លី', en: 'short sleeve' },
-  'rain-proof': { km: 'ការពារភ្លៀង', en: 'rain-proof' },
+  shorts: { km: 'ខោខ្លី', en: 'shorts' },
   formal: { km: 'ផ្លូវការ', en: 'formal' },
   casual: { km: 'ធម្មតា', en: 'casual' },
+  traditional: { km: 'ប្រពៃណី', en: 'traditional' },
+  'rain-proof': { km: 'ការពារភ្លៀង', en: 'rain-proof' },
+  'sun-protective': { km: 'ការពារកំដៅថ្ងៃ', en: 'sun cover' },
+}
+
+/**
+ * Tags grouped for the picker. Twenty chips in one flat row is a wall; grouped
+ * they read as a few small decisions, which is what they are.
+ */
+const TAG_GROUPS: Record<Domain, { km: string; en: string; tags: Tag[] }[]> = {
+  meal: [
+    { km: 'ប្រភេទ', en: 'Kind', tags: ['soup', 'porridge', 'rice', 'noodle', 'grill', 'fried', 'steamed', 'curry', 'salad'] },
+    { km: 'សាច់ / បន្លែ', en: 'Main', tags: ['fish', 'meat', 'egg', 'veg'] },
+    { km: 'រសជាតិ', en: 'Character', tags: ['spicy', 'sour', 'sweet', 'fruit', 'light', 'heavy'] },
+    { km: 'ទីកន្លែង', en: 'Where', tags: ['street'] },
+  ],
+  outfit: [
+    { km: 'បែប', en: 'Cut', tags: ['long-sleeve', 'short-sleeve', 'shorts'] },
+    { km: 'រចនាបថ', en: 'Style', tags: ['formal', 'casual', 'traditional'] },
+    { km: 'អាកាសធាតុ', en: 'Weather', tags: ['rain-proof', 'sun-protective', 'light', 'heavy'] },
+  ],
 }
 
 /** Where the answer came from, and why — so a broken binding is visible. */
@@ -132,7 +160,7 @@ export function DecideView() {
   const [draftFreq, setDraftFreq] = useState<SeedFrequency>('weekly')
 
   const wear = domain === 'outfit'
-  const vocabulary = (wear ? OUTFIT_TAGS : MEAL_TAGS) as readonly Tag[]
+  const groups = TAG_GROUPS[domain]
 
   const refresh = useCallback(async () => {
     try {
@@ -340,17 +368,22 @@ export function DecideView() {
               placeholder={wear ? (km ? 'ឈ្មោះសម្លៀកបំពាក់' : 'Garment name') : (km ? 'ឈ្មោះម្ហូប' : 'Dish name')}
               aria-label={km ? 'ឈ្មោះ' : 'Name'}
             />
-            <div className="decide-chips">
-              {vocabulary.map((t) => (
-                <button
-                  key={t}
-                  className={draftTags.includes(t) ? 'is-on' : ''}
-                  onClick={() => toggleTag(t)}
-                >
-                  {tagText(t)}
-                </button>
-              ))}
-            </div>
+            {groups.map((g) => (
+              <div key={g.en} className="decide-group">
+                <span className="decide-group-label">{km ? g.km : g.en}</span>
+                <div className="decide-chips">
+                  {g.tags.map((t) => (
+                    <button
+                      key={t}
+                      className={draftTags.includes(t) ? 'is-on' : ''}
+                      onClick={() => toggleTag(t)}
+                    >
+                      {tagText(t)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
             <div className="decide-chips">
               {FREQUENCIES.map((f) => (
                 <button

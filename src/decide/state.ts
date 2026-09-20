@@ -36,12 +36,20 @@ export type RainBucket = 'dry' | 'showers' | 'rain'
  * leak free text off-device and blow up the cache key space.
  */
 export const MEAL_TAGS = [
-  'soup', 'grill', 'fried', 'rice', 'noodle', 'salad', 'fruit', 'sweet', 'spicy',
-  'light', 'heavy',
+  // Kind of dish
+  'soup', 'porridge', 'rice', 'noodle', 'grill', 'fried', 'steamed', 'curry', 'salad',
+  // What's in it — the axis people actually notice repeating
+  'fish', 'meat', 'egg', 'veg',
+  // Character
+  'spicy', 'sour', 'sweet', 'fruit', 'light', 'heavy',
+  // Where it comes from (rain makes a stall a worse idea)
+  'street',
 ] as const
 
 export const OUTFIT_TAGS = [
-  'long-sleeve', 'short-sleeve', 'rain-proof', 'formal', 'casual', 'light', 'heavy',
+  'long-sleeve', 'short-sleeve', 'shorts',
+  'formal', 'casual', 'traditional',
+  'rain-proof', 'sun-protective', 'light', 'heavy',
 ] as const
 
 export type MealTag = (typeof MEAL_TAGS)[number]
