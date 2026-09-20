@@ -24,6 +24,21 @@ import {
   setAvailable,
 } from '../decide/habit'
 import { type ScoreReason, JevScorer } from '../decide/jev'
+import { localConfidence } from '../decide/suggest'
+
+/**
+ * How decisive the remote pick was, as lift over chance.
+ *
+ * Shown instead of the raw confidence because they answer different questions.
+ * A 36% confidence over five close options is NOT "the app is unsure" — it is
+ * "these are all reasonable", which is a useful answer, not a weak one.
+ */
+function decisiveness(top: number, options: number): { km: string; en: string } {
+  const lift = top * options
+  if (lift >= 2.5) return { km: 'ជម្រើសច្បាស់លាស់', en: 'clear winner' }
+  if (lift >= 1.8) return { km: 'ល្អជាងគេបន្តិច', en: 'mild preference' }
+  return { km: 'ប្រហាក់ប្រហែលគ្នា', en: 'close call — any of the top few work' }
+}
 
 /**
  * Decide (/decide) — "what should I eat today?" / "what should I wear today?"
@@ -162,7 +177,9 @@ export function DecideView() {
       setStatus(scorer.lastStatus)
       setDetail(scorer.lastDetail)
       setRemote(scorer.lastRemote)
-      setConfidence(ranked[0]?.confidence ?? 0)
+      // Whichever scorer answered, this is ITS confidence — the source is
+      // printed next to it, so the number is never unlabelled.
+      setConfidence(ranked[0]?.confidence ?? localConfidence(state))
       setLabels(await labelsFor(ranked.map((r) => r.key)))
     } catch (err) {
       setError(String(err))
@@ -261,6 +278,22 @@ export function DecideView() {
 
           {results && results.length > 0 && (
             <>
+              <p className="decide-status">
+                {km ? 'ទំនុកចិត្ត' : 'Confidence'} {Math.round(confidence * 100)}% ·{' '}
+                {km ? SOURCES[reason].km : SOURCES[reason].en}
+                {status ? ` (${status})` : ''} · {entries} {km ? 'កំណត់ត្រា' : 'entries'}
+              </p>
+              {detail && <p className="decide-error">{detail}</p>}
+              {remote && (
+                <p className="decide-meta">
+                  Jev · {km
+                    ? decisiveness(remote.top, remote.options).km
+                    : decisiveness(remote.top, remote.options).en}{' '}
+                  · {remote.options} {km ? 'ជម្រើស' : 'options'} · top {remote.top.toFixed(2)} ·
+                  lift {(remote.top * remote.options).toFixed(2)}
+                </p>
+              )}
+
               <ol className="decide-results">
                 {results.map((r, i) => (
                   <li key={r.key} className={i === 0 ? 'is-top' : ''}>
@@ -285,20 +318,7 @@ export function DecideView() {
                 ))}
               </ol>
 
-              <p className="decide-meta">
-                {km ? 'ទំនុកចិត្ត' : 'Confidence'} {Math.round(confidence * 100)}% ·{' '}
-                {km ? SOURCES[reason].km : SOURCES[reason].en}
-                {status ? ` (${status})` : ''} · {entries} {km ? 'កំណត់ត្រា' : 'entries'}
-              </p>
-              {detail && <p className="decide-error">{detail}</p>}
-              {remote && reason !== 'used' && (
-                <p className="decide-meta">
-                  Jev: conf {remote.confidence.toFixed(2)} · top {remote.top.toFixed(2)} ·{' '}
-                  {remote.options} {km ? 'ជម្រើស' : 'options'} · lift{' '}
-                  {(remote.top * remote.options).toFixed(2)}
-                </p>
-              )}
-              {confidence < 0.6 && (
+              {entries < 35 && (
                 <p className="decide-hint">
                   {km
                     ? 'កត់ត្រាបន្តិចទៀត នោះការណែនាំនឹងកាន់តែត្រឹមត្រូវ។'

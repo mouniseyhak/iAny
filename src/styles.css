@@ -3202,3 +3202,12 @@ progress {
   padding: 0.3rem 0.65rem; border-radius: 999px; cursor: pointer; font-size: 0.82rem;
   border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit;
 }
+
+/* Headline status sits directly under the ask button, above the answer — it
+   frames how much to trust what follows, so it must be read first, not found
+   after scrolling past every result. */
+.decide-status {
+  margin: 0; font-size: 0.86rem; font-weight: 600; opacity: 0.8;
+  padding: 0.5rem 0.7rem; border-radius: 0.6rem;
+  background: var(--border, #e2e8f0);
+}
