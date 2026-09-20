@@ -102,6 +102,7 @@ export function DecideView() {
   const [labels, setLabels] = useState<Map<string, string>>(new Map())
   const [reason, setReason] = useState<ScoreReason>('not-needed')
   const [status, setStatus] = useState(0)
+  const [detail, setDetail] = useState('')
   const [confidence, setConfidence] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -158,6 +159,7 @@ export function DecideView() {
       setResults(ranked)
       setReason(scorer.lastReason)
       setStatus(scorer.lastStatus)
+      setDetail(scorer.lastDetail)
       setConfidence(ranked[0]?.confidence ?? 0)
       setLabels(await labelsFor(ranked.map((r) => r.key)))
     } catch (err) {
@@ -286,6 +288,7 @@ export function DecideView() {
                 {km ? SOURCES[reason].km : SOURCES[reason].en}
                 {status ? ` (${status})` : ''} · {entries} {km ? 'កំណត់ត្រា' : 'entries'}
               </p>
+              {detail && <p className="decide-error">{detail}</p>}
               {confidence < 0.6 && (
                 <p className="decide-hint">
                   {km

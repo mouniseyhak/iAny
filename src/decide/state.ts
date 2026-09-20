@@ -239,9 +239,69 @@ export function calendarDaysBetween(from: Date, to: Date): number {
  * Candidates are sorted so member order can never produce two keys for one
  * situation.
  */
+/**
+ * What a candidate looks like to a scorer, with its identity removed.
+ *
+ * The decision depends only on tags, how long ago it was chosen and whether
+ * it's available — never on WHICH item it is. Keeping identity out of this
+ * string is what makes two different people's situations compare equal.
+ */
+export function candidateSignature(c: Candidate): string {
+  return `${c.tags.join('+')}:${agoBucket(c.daysSinceUsed)}:${c.available ? 1 : 0}`
+}
+
+/**
+ * Canonical ordering for aliasing. Sorted by signature so that two devices
+ * holding structurally identical situations produce the same order, and a
+ * cached answer from one applies correctly to the other. The `key` tie-break
+ * only ever separates candidates whose signatures are already identical, so
+ * the model's answer for them is interchangeable by construction.
+ *
+ * Unavailable candidates are excluded: they are never sent, so letting them
+ * consume an alias slot would leave gaps (`opt_2` with no `opt_1`) and make two
+ * devices asking the identical question disagree on numbering.
+ */
+export function aliasOrder(candidates: readonly Candidate[]): Candidate[] {
+  return candidates.filter((c) => c.available).sort((a, b) => {
+    const sa = candidateSignature(a)
+    const sb = candidateSignature(b)
+    if (sa !== sb) return sa < sb ? -1 : 1
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0
+  })
+}
+
+/**
+ * Per-request aliases (`opt_1`, `opt_2`, …) used in place of item ids.
+ *
+ * Two reasons, both load-bearing:
+ *  - A device-local UUID is a STABLE identifier. Sending it would let a server
+ *    correlate requests over time and learn "this device's item 20baea65 wins
+ *    on hot days" — a profile, rebuilt from data we promised not to send.
+ *  - It keeps the keys to a plain identifier shape, which is what the docs'
+ *    examples use.
+ */
+export function aliasMap(candidates: readonly Candidate[]): {
+  toAlias: Map<string, string>
+  toKey: Map<string, string>
+} {
+  const toAlias = new Map<string, string>()
+  const toKey = new Map<string, string>()
+  aliasOrder(candidates).forEach((c, i) => {
+    const alias = `opt_${i + 1}`
+    toAlias.set(c.key, alias)
+    toKey.set(alias, c.key)
+  })
+  return { toAlias, toKey }
+}
+
 export function stateKey(state: DecisionState): string {
+  // Signatures of the AVAILABLE candidates only. Two reasons: including a
+  // device-local UUID meant no two devices ever produced the same key for the
+  // same situation, and an unavailable item is not part of the question asked,
+  // so letting it change the key would fragment the cache for no benefit.
   const cands = state.candidates
-    .map((c) => `${c.key}:${c.tags.join('+')}:${agoBucket(c.daysSinceUsed)}:${c.available ? 1 : 0}`)
+    .filter((c) => c.available)
+    .map(candidateSignature)
     .sort()
     .join(',')
   const recent = [...state.recentTags].sort().join('+')

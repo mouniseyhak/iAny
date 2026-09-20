@@ -252,13 +252,17 @@ ok('describes the situation', described.includes('midday') && described.includes
 const qs = buildQuestions(remoteState)
 const pickQ = qs['pick'] as { type: string; criteria: Record<string, string> }
 ok('choice covers available candidates only',
-   Object.keys(pickQ.criteria).join() === 'uuid-1')
-ok('criteria carry tags, never labels', pickQ.criteria['uuid-1']!.includes('soup'))
+   Object.keys(pickQ.criteria).join() === 'opt_1')
+ok('criteria carry tags, never labels', pickQ.criteria['opt_1']!.includes('soup'))
+ok('item ids never leave the device',
+   !JSON.stringify(qs).includes('uuid-1') && !JSON.stringify(qs).includes('uuid-2'))
+ok('keys are plain identifiers',
+   Object.keys(pickQ.criteria).every((k) => /^[a-z][a-z0-9_]*$/.test(k)))
 ok('asks a score and a noul too', qs['heaviness']?.type === 'score' && qs['needs_variety']?.type === 'noul')
 
 const remote = readRanking(remoteState, {
   answers: {
-    pick: { type: 'choice', choice: 'uuid-1', confidence: 0.8, probabilities: { 'uuid-1': 0.9 } },
+    pick: { type: 'choice', choice: 'opt_1', confidence: 0.8, probabilities: { opt_1: 0.9 } },
     needs_variety: { type: 'noul', noul: 0.95 },
   },
 })
@@ -269,6 +273,33 @@ ok('high variety signal is cited',
    remote[0]!.reasons.some((r) => r.code === 'tag-fatigue'))
 ok('missing answers degrade to 0, not NaN',
    readRanking(remoteState, { answers: {} }).every((r) => r.score === 0 && !Number.isNaN(r.score)))
+
+console.log('\ncache key is shareable between people')
+// Two devices, same situation, different local ids. Before this fix the ids
+// were in the key, so no two people could ever share a cached answer.
+const deviceA = state({ historyCount: 0, candidates: [
+  seedCandidate('11111111-aaaa', 'meal', ['soup'], 'weekly'),
+  seedCandidate('22222222-bbbb', 'meal', ['rice'], 'daily') ] })
+const deviceB = state({ historyCount: 0, candidates: [
+  seedCandidate('99999999-zzzz', 'meal', ['soup'], 'weekly'),
+  seedCandidate('88888888-yyyy', 'meal', ['rice'], 'daily') ] })
+ok('same situation on two devices = same cache key',
+   stateKey(deviceA) === stateKey(deviceB))
+ok('no item id appears in the cache key',
+   !stateKey(deviceA).includes('11111111') && !stateKey(deviceA).includes('22222222'))
+ok('a different situation still differs',
+   stateKey(deviceA) !== stateKey({ ...deviceA, weather: 'hot' }))
+// An answer cached by A must map onto B's own ids, not A's.
+const cached = { answers: { pick: { type: 'choice', choice: 'opt_2',
+  confidence: 0.9, probabilities: { opt_1: 0.2, opt_2: 0.8 } } } }
+const forB = readRanking(deviceB, cached)
+ok("another device's cached answer maps to local ids",
+   forB[0]!.score === 0.8 && deviceB.candidates.some((c) => c.key === forB[0]!.key))
+ok('alias order follows the signature, not the id',
+   // 'rice' sorts before 'soup', so opt_2 is the soup item on BOTH devices —
+   // different local ids, same meaning. That is what makes the cache portable.
+   readRanking(deviceA, cached)[0]!.key === '11111111-aaaa' &&
+   forB[0]!.key === '99999999-zzzz')
 
 console.log('\nwhen to spend a remote call')
 const deep = state({ historyCount: 60, candidates: [
@@ -301,16 +332,23 @@ const badStatus = new JevScorer('/api/decide', (async () =>
 ok('server error falls back to local', (await badStatus.rank(thin)).length === 2)
 ok('server error names the cause', badStatus.lastReason === 'server-error')
 ok('server error keeps the status code', badStatus.lastStatus === 503)
+const withDetail = new JevScorer('/api/decide', (async () => new Response(
+  JSON.stringify({ error: 'model-failed', detail: 'no such model' }),
+  { status: 502 })) as unknown as typeof fetch)
+await withDetail.rank(thin)
+ok('the server error detail is captured',
+   withDetail.lastDetail === 'model-failed: no such model')
 
 const lowConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
-  answers: { pick: { type: 'choice', confidence: 0.1, probabilities: { a: 0.5, b: 0.5 } } },
+  answers: { pick: { type: 'choice', confidence: 0.1, probabilities: { opt_1: 0.5, opt_2: 0.5 } } },
 }))) as unknown as typeof fetch)
 await lowConf.rank(thin)
 ok('an under-confident remote answer is discarded', lowConf.lastSource === 'local')
 ok('a discarded answer names the cause', lowConf.lastReason === 'low-confidence')
 
 const goodConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
-  answers: { pick: { type: 'choice', confidence: 0.85, probabilities: { a: 0.7, b: 0.3 } } },
+  // opt_1 is cand('a') — 'rice' sorts before 'soup'.
+  answers: { pick: { type: 'choice', confidence: 0.85, probabilities: { opt_1: 0.7, opt_2: 0.3 } } },
 }))) as unknown as typeof fetch)
 const remoteRanked = await goodConf.rank(thin)
 ok('a confident remote answer is used', goodConf.lastSource === 'remote')

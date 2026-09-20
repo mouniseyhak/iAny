@@ -27,6 +27,7 @@ import {
   type Scorer,
   MIN_CONFIDENCE,
   agoBucket,
+  aliasMap,
   stateKey,
 } from './state'
 import { isAmbiguous, rankLocal } from './suggest'
@@ -111,11 +112,18 @@ export function describeState(state: DecisionState): string {
   )
 }
 
-/** One call: the ranking plus the two judgements that explain it. */
+/**
+ * One call: the ranking plus the two judgements that explain it.
+ *
+ * Candidates are sent as `opt_1`…`opt_n`, never as item ids — see
+ * `aliasMap()`. Nothing leaves that could be correlated across requests.
+ */
 export function buildQuestions(state: DecisionState): Record<string, JevQuestion> {
   const criteria: Record<string, string> = {}
+  const { toAlias } = aliasMap(state.candidates)
   for (const c of state.candidates) {
-    if (c.available) criteria[c.key] = describeCandidate(c)
+    const alias = toAlias.get(c.key)
+    if (c.available && alias) criteria[alias] = describeCandidate(c)
   }
   const verb = state.domain === 'meal' ? 'eat' : 'wear'
   return {
@@ -153,8 +161,17 @@ export function buildRequest(state: DecisionState): JevRequest {
  */
 export function readRanking(state: DecisionState, resp: JevResponse): Scored[] {
   const pick = resp.answers?.['pick']
-  const probs = pick?.probabilities ?? {}
+  const rawProbs = pick?.probabilities ?? {}
   const confidence = pick?.confidence ?? 0
+
+  // Aliases back to local ids. Rebuilt from the same canonical ordering the
+  // request used, so a cached answer from another device maps correctly here.
+  const { toKey } = aliasMap(state.candidates)
+  const probs: Record<string, number> = {}
+  for (const [alias, p] of Object.entries(rawProbs)) {
+    const key = toKey.get(alias)
+    if (key) probs[key] = p
+  }
 
   const aux: Reason[] = []
   const variety = resp.answers?.['needs_variety']?.noul
@@ -217,6 +234,10 @@ export class JevScorer implements Scorer {
   lastReason: ScoreReason = 'not-needed'
   /** HTTP status when `lastReason` is 'server-error', else 0. */
   lastStatus = 0
+  /** The server's own error code, when it sent one. A bare status number is
+   *  not enough to act on — 502 could be a missing model, a rejected schema
+   *  or a quota, and only the body distinguishes them. */
+  lastDetail = ''
 
   constructor(
     private endpoint = '/api/decide',
@@ -227,6 +248,7 @@ export class JevScorer implements Scorer {
     const local = rankLocal(state)
     this.lastSource = 'local'
     this.lastStatus = 0
+    this.lastDetail = ''
     if (state.candidates.length === 0 || !this.fetchImpl) {
       this.lastReason = 'single-option'
       return local
@@ -249,6 +271,12 @@ export class JevScorer implements Scorer {
       if (!res.ok) {
         this.lastReason = 'server-error'
         this.lastStatus = res.status
+        try {
+          const body = (await res.json()) as { error?: string; detail?: string }
+          this.lastDetail = [body.error, body.detail].filter(Boolean).join(': ').slice(0, 300)
+        } catch {
+          this.lastDetail = ''
+        }
         return local
       }
       const remote = readRanking(state, (await res.json()) as JevResponse)
