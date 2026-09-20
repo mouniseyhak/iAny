@@ -19,7 +19,7 @@ import {
 } from './state'
 import { isAmbiguous, localConfidence, rankLocal, scoreCandidate } from './suggest'
 import { cosineDistance, normalize, updateCentroid, verdictFor } from './match'
-import { JevScorer, buildQuestions, describeShape, describeState, normalizeJevResponse, readRanking, shouldConsultRemote } from './jev'
+import { JevScorer, buildQuestions, describeShape, describeState, normalizeJevResponse, readRanking, remoteIsInformative, shouldConsultRemote } from './jev'
 
 let pass = 0; const fails: string[] = []
 const ok = (n: string, c: boolean) => { c ? (pass++, console.log('  ✓', n)) : (fails.push(n), console.log('  ✗', n)) }
@@ -320,6 +320,20 @@ ok('shape describes keys, never values',
 ok('shape handles arrays and scalars',
    describeShape([1, 2, 3]) === 'array(3)' && describeShape(null) === 'null')
 
+console.log('\nis the remote answer informative? (lift, not a flat floor)')
+// The bug this replaces: a flat 0.6 threshold demanded near-certainty from a
+// choice among many similar options, so honest calibration read as failure.
+ok('5 options, clear winner at 0.45 is informative', remoteIsInformative(0.5, 0.45, 5))
+ok('5 options, uniform 0.2 is not', !remoteIsInformative(0.5, 0.2, 5))
+ok('2 options needs a real margin', !remoteIsInformative(0.9, 0.6, 2))
+ok('2 options, 0.75 clears it', remoteIsInformative(0.9, 0.75, 2))
+ok('10 options, 0.18 is informative (1.8x chance)', remoteIsInformative(0.5, 0.18, 10))
+ok('near-random confidence is rejected whatever the lift',
+   !remoteIsInformative(0.2, 0.9, 5))
+ok('one option is never informative', !remoteIsInformative(0.99, 1, 1))
+ok('the old flat floor would have rejected a good 5-way answer',
+   remoteIsInformative(0.45, 0.42, 5) && 0.45 < 0.6)
+
 console.log('\nwhen to spend a remote call')
 const deep = state({ historyCount: 60, candidates: [
   cand('a', ['rice'], { daysSinceUsed: 20 }), cand('b', ['soup'], { daysSinceUsed: 1 }) ] })
@@ -359,11 +373,14 @@ ok('the server error detail is captured',
    withDetail.lastDetail === 'model-failed: no such model')
 
 const lowConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
+  // Dead uniform over two options: no information, whatever it claims.
   answers: { pick: { type: 'choice', confidence: 0.1, probabilities: { opt_1: 0.5, opt_2: 0.5 } } },
 }))) as unknown as typeof fetch)
 await lowConf.rank(thin)
 ok('an under-confident remote answer is discarded', lowConf.lastSource === 'local')
 ok('a discarded answer names the cause', lowConf.lastReason === 'low-confidence')
+ok('the discarded numbers are kept for calibration',
+   lowConf.lastRemote?.options === 2 && lowConf.lastRemote?.top === 0.5)
 
 const goodConf = new JevScorer('/api/decide', (async () => new Response(JSON.stringify({
   // opt_1 is cand('a') — 'rice' sorts before 'soup'.

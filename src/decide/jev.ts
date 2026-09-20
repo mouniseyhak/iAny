@@ -10,9 +10,10 @@
  *     stop mattering. Khmer enters and leaves purely on-device.
  *  2. The model evaluates ONE state against MANY questions in parallel, so the
  *     ranking and its explanation cost a single round trip.
- *  3. Below `MIN_CONFIDENCE` the caller falls back to the local scorer, which
- *     turns "confidently wrong" from a silent failure into a handled branch.
- *     Calibrated is not the same as correct, and the floor is where we say so.
+ *  3. An uninformative remote answer is discarded and the local one used, so
+ *     "confidently wrong" is a handled branch rather than a silent failure.
+ *     Informative means lift over uniform, NOT a flat confidence threshold —
+ *     see `remoteIsInformative()` for why that distinction matters.
  *
  * The call itself runs in the Worker (`env.AI.run`), never the browser: the
  * account binding stays server-side and the response is cached under
@@ -232,6 +233,44 @@ export function readRanking(state: DecisionState, resp: JevResponse): Scored[] {
  * a settled habit with a clear winner doesn't need a second opinion, and not
  * asking keeps the answer instant and free.
  */
+/**
+ * Absolute floor. Below this the model is telling us its answer is close to
+ * random, and no amount of normalising makes that useful.
+ */
+export const REMOTE_MIN_CONFIDENCE = 0.35
+
+/**
+ * How far above chance the top option must sit. 1.0 is exactly uniform (no
+ * information); 1.4 means the winner carries 40% more mass than if the model
+ * had shrugged.
+ */
+export const MIN_LIFT = 1.4
+
+/**
+ * Is the remote answer actually informative?
+ *
+ * The first version compared the model's scalar confidence to a flat 0.6, which
+ * is wrong for a choice question: confidence tracks how PEAKED the distribution
+ * is, and a peak gets harder to reach as options multiply. Demanding 0.6 across
+ * five near-equivalent dishes demanded near-certainty about something genuinely
+ * close — so a correctly-calibrated "these are similar" was thrown away as a
+ * failure. Jev's whole claim is calibration; punishing it for being honest
+ * defeats the point of using it.
+ *
+ * So the test is lift over uniform — did the model discriminate more than
+ * chance? — with a low absolute floor to reject noise.
+ */
+export function remoteIsInformative(
+  confidence: number,
+  topProbability: number,
+  optionCount: number,
+): boolean {
+  if (optionCount < 2) return false
+  if (confidence < REMOTE_MIN_CONFIDENCE) return false
+  const uniform = 1 / optionCount
+  return topProbability / uniform >= MIN_LIFT
+}
+
 export function shouldConsultRemote(state: DecisionState, local: readonly Scored[]): boolean {
   // Nothing to choose between — a second opinion cannot change the answer.
   if (state.candidates.filter((c) => c.available).length < 2) return false
@@ -273,6 +312,9 @@ export class JevScorer implements Scorer {
    *  not enough to act on — 502 could be a missing model, a rejected schema
    *  or a quota, and only the body distinguishes them. */
   lastDetail = ''
+  /** What the model actually returned, kept even when the answer is rejected —
+   *  a threshold can only be calibrated against real numbers. */
+  lastRemote: { confidence: number; top: number; options: number } | null = null
 
   constructor(
     private endpoint = '/api/decide',
@@ -284,6 +326,7 @@ export class JevScorer implements Scorer {
     this.lastSource = 'local'
     this.lastStatus = 0
     this.lastDetail = ''
+    this.lastRemote = null
     if (state.candidates.length === 0 || !this.fetchImpl) {
       this.lastReason = 'single-option'
       return local
@@ -311,12 +354,17 @@ export class JevScorer implements Scorer {
           this.lastDetail = [body.error, body.detail].filter(Boolean).join(': ').slice(0, 300)
         } catch {
           this.lastDetail = ''
+    this.lastRemote = null
         }
         return local
       }
       const remote = readRanking(state, (await res.json()) as JevResponse)
       const top = remote[0]
-      if (!top || top.confidence < MIN_CONFIDENCE) {
+      const options = state.candidates.filter((c) => c.available).length
+      this.lastRemote = top
+        ? { confidence: top.confidence, top: top.score, options }
+        : null
+      if (!top || !remoteIsInformative(top.confidence, top.score, options)) {
         this.lastReason = 'low-confidence'
         return local
       }

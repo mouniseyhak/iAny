@@ -103,6 +103,7 @@ export function DecideView() {
   const [reason, setReason] = useState<ScoreReason>('not-needed')
   const [status, setStatus] = useState(0)
   const [detail, setDetail] = useState('')
+  const [remote, setRemote] = useState<{ confidence: number; top: number; options: number } | null>(null)
   const [confidence, setConfidence] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -160,6 +161,7 @@ export function DecideView() {
       setReason(scorer.lastReason)
       setStatus(scorer.lastStatus)
       setDetail(scorer.lastDetail)
+      setRemote(scorer.lastRemote)
       setConfidence(ranked[0]?.confidence ?? 0)
       setLabels(await labelsFor(ranked.map((r) => r.key)))
     } catch (err) {
@@ -289,6 +291,13 @@ export function DecideView() {
                 {status ? ` (${status})` : ''} · {entries} {km ? 'កំណត់ត្រា' : 'entries'}
               </p>
               {detail && <p className="decide-error">{detail}</p>}
+              {remote && reason !== 'used' && (
+                <p className="decide-meta">
+                  Jev: conf {remote.confidence.toFixed(2)} · top {remote.top.toFixed(2)} ·{' '}
+                  {remote.options} {km ? 'ជម្រើស' : 'options'} · lift{' '}
+                  {(remote.top * remote.options).toFixed(2)}
+                </p>
+              )}
               {confidence < 0.6 && (
                 <p className="decide-hint">
                   {km
