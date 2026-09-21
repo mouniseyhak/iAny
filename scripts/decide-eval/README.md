@@ -52,3 +52,21 @@ npx esbuild scripts/decide-eval/gen-payloads.ts --bundle --platform=node \
   --format=esm --outfile=node_modules/.cache/gen-payloads.mjs
 node node_modules/.cache/gen-payloads.mjs > scripts/decide-eval/payloads.json
 ```
+
+## Results: 2026-09-21, Kaggle CPU, router (→ English checkpoint)
+
+Full output in `results/2026-09-21-kaggle-router.json`. Summary — verdict: **keep Jev**.
+
+| probe | expected | Laya answered |
+|---|---|---|
+| M6 coin toss (ground truth) | the dish NOT eaten yesterday | the one eaten yesterday (0.58) |
+| O1 wedding ("attending a wedding" in the state) | sampot hol | office shirt; sampot p=0.11 |
+| M4 fried-heavy week | anything not fried; variety=yes | fried rice; needs_variety 0.40 |
+| effort score, 12 varied situations | should vary | 0.94–0.97, effectively constant |
+
+Agreement with the on-device scorer 2/12 (the two easiest cases). Median
+latency 4 s/call on x86 CPU (the 33 ms figure is T4 GPU), which also closes
+the on-device ONNX path at this quality. Caveats recorded for fairness: the
+confidence scalar is not Jev-comparable (so gate verdicts here reflect
+semantics as much as quality), and this task is likely outside Laya's
+training distribution — `--model typed-decisions` remains untried.
