@@ -517,7 +517,7 @@ export function GardenView() {
 
           {error ? <p className="voice-error">{error}</p> : null}
           <div className="voice-controls">
-            <button className="voice-ghost" onClick={() => { setImage(null); setPreviewUrl(''); setGps(null); setLocationMessage(''); locationRequestId.current += 1; if (fileRef.current) fileRef.current.value = '' }}>↺</button>
+            <button className="voice-ghost" onClick={() => { setImage(null); setPreviewUrl(''); setGps(null); setLocationMessage(''); locationRequestId.current += 1; setLocating(false); if (fileRef.current) fileRef.current.value = '' }}>↺</button>
             <button className="voice-primary big" onClick={save} disabled={saving || locating || processingPhoto}>
               {saving ? '…' : `✓ ${km ? 'ចុះហត្ថលេខា & រក្សាទុក' : 'Sign & save'}`}
             </button>
